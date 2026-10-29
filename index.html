@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Escáner</title>
+<style>
+  :root { color-scheme: light dark; --accent: #0a84ff; --ok: #30d158; --warn: #ff9f0a; --danger: #ff453a; }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 600px; padding: 12px; font: 16px -apple-system, system-ui, sans-serif; }
+  h1 { font-size: 20px; margin: 4px 0 12px; }
+  #cam { position: relative; aspect-ratio: 4/3; background: #000; border-radius: 12px; overflow: hidden; }
+  #cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #cam::after { content: ""; position: absolute; inset: 30% 10%; border: 3px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px #0006; transition: border-color .2s; }
+  #cam.hit::after { border-color: var(--ok); }
+  .bar { display: flex; gap: 8px; margin: 10px 0; }
+  button { flex: 1; padding: 14px; border: 0; border-radius: 10px; font: 600 15px system-ui; background: var(--accent); color: #fff; }
+  button.sec { background: #8884; color: inherit; }
+  .row { padding: 10px 0 10px 10px; border-bottom: 1px solid #8883; border-left: 4px solid transparent; }
+  .row.pend { border-left-color: var(--warn); }
+  .top { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, monospace; word-break: break-all; }
+  .top b { color: #888; font-weight: 400; }
+  .top span { flex: 1; }
+  .del { flex: 0; padding: 4px 8px; background: none; color: var(--danger); font-size: 18px; }
+  .st { display: flex; gap: 6px; margin-top: 8px; }
+  .st button { padding: 10px 4px; font-size: 14px; background: #8882; color: inherit; }
+  .st button.on { color: #fff; }
+  .st button.on[data-s="En stock"] { background: var(--ok); }
+  .st button.on[data-s="Asignada"] { background: var(--accent); }
+  .st button.on[data-s="Reparar"] { background: var(--warn); }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #000c; color: #fff; padding: 10px 18px; border-radius: 20px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<h1>Escáner de códigos</h1>
+
+<div id="cam" hidden><video playsinline muted></video></div>
+
+<div class="bar"><button id="scan">📷 Escanear</button></div>
+<div class="bar">
+  <button id="copy">📋 Copiar (<span id="count">0</span>)</button>
+  <button id="clear" class="sec">🗑 Borrar todo</button>
+</div>
+<div class="bar"><button id="csv" class="sec">📤 Compartir CSV</button></div>
+
+<div id="list"></div>
+
+<div id="toast"></div>
+
+<script type="module">
+const POLYFILL = 'https://fastly.jsdelivr.net/npm/barcode-detector@2/dist/es/pure.min.js';
+const KEY = 'scans';
+const ESTADOS = ['En stock', 'Asignada', 'Reparar'];
+const $ = s => document.querySelector(s);
+const video = $('video'), cam = $('#cam'), list = $('#list'), btnScan = $('#scan');
+
+let rows = JSON.parse(localStorage.getItem(KEY) || '[]');
+let stream, detector, timer, audio, last = '', lastT = 0;
+
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function render() {
+  // Lo último escaneado arriba (cerca de la cámara); los datos quedan en orden de escaneo
+  list.innerHTML = rows.map((r, i) =>
+    `<div class="row${r.estado ? '' : ' pend'}">
+      <div class="top"><b>${i + 1}</b><span>${esc(r.code)}</span><button class="del" data-i="${i}" aria-label="Borrar">✕</button></div>
+      <div class="st">${ESTADOS.map(s => `<button data-i="${i}" data-s="${s}" class="${r.estado === s ? 'on' : ''}">${s}</button>`).join('')}</div>
+    </div>`).reverse().join('');
+  $('#count').textContent = rows.length;
+  localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
+}
+
+let tt;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(tt);
+  tt = setTimeout(() => t.classList.remove('show'), 1500);
+}
+
+function feedback() {
+  navigator.vibrate?.(80);
+  cam.classList.add('hit');
+  setTimeout(() => cam.classList.remove('hit'), 400);
+  const o = audio.createOscillator();
+  o.frequency.value = 1200;
+  o.connect(audio.destination);
+  o.start();
+  o.stop(audio.currentTime + 0.08);
+}
+
+function add(code) {
+  // Evita registrar el mismo código mientras sigue frente a la cámara
+  const now = Date.now(), same = code === last && now - lastT < 2000;
+  last = code; lastT = now;
+  if (same) return;
+  if (rows.some(r => r.code === code)) return toast('Ya escaneado: ' + code);
+  rows.push({ code, estado: '' });
+  render();
+  feedback();
+  toast('✓ ' + code);
+}
+
+async function loop() {
+  if (!stream) return;
+  try {
+    const [hit] = await detector.detect(video);
+    if (hit) add(hit.rawValue);
+  } catch {}
+  timer = setTimeout(loop, 200);
+}
+
+async function start() {
+  try {
+    audio ??= new AudioContext(); // se crea tras un toque (requisito de iOS)
+    if (!detector) {
+      // Nativo en Chrome/Android; en Safari/iOS se carga el polyfill solo si hace falta
+      const BD = window.BarcodeDetector ?? (await import(POLYFILL)).BarcodeDetector;
+      detector = new BD();
+    }
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    cam.hidden = false;
+    btnScan.textContent = '⏹ Detener';
+    loop();
+  } catch (e) {
+    toast('Error: ' + e.message);
+    stop();
+  }
+}
+
+function stop() {
+  stream?.getTracks().forEach(t => t.stop());
+  stream = null;
+  clearTimeout(timer);
+  cam.hidden = true;
+  btnScan.textContent = '📷 Escanear';
+}
+
+async function copy() {
+  if (!rows.length) return toast('No hay datos');
+  const text = rows.map(r => `${r.code} - ${r.estado || 'Sin estado'}`).join('\n');
+  const html = '<table border="1"><tr><th>Número</th><th>Estado</th></tr>' +
+    rows.map(r => `<tr><td>${esc(r.code)}</td><td>${r.estado}</td></tr>`).join('') + '</table>';
+  try {
+    // Teams usa la versión HTML (tabla); WhatsApp usa el texto plano
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/plain': new Blob([text], { type: 'text/plain' }),
+      'text/html': new Blob([html], { type: 'text/html' })
+    })]);
+  } catch {
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      const t = document.createElement('textarea');
+      t.value = text;
+      document.body.append(t);
+      t.select();
+      document.execCommand('copy');
+      t.remove();
+    }
+  }
+  toast('Copiado ✓');
+}
+
+async function shareCSV() {
+  if (!rows.length) return toast('No hay datos');
+  const q = s => `"${String(s).replace(/"/g, '""')}"`;
+  const lines = [['Número', 'Estado'], ...rows.map(r => [r.code, r.estado])];
+  // BOM + ";" para que Excel en español lo abra con acentos y columnas bien
+  const csv = '\ufeff' + lines.map(l => l.map(q).join(';')).join('\r\n');
+  const name = `escaneos_${new Date().toISOString().slice(0, 10)}.csv`;
+  const file = new File([csv], name, { type: 'text/csv' });
+  if (navigator.canShare?.({ files: [file] })) {
+    // Abre el menú Compartir del celular → Teams, WhatsApp, Mail, etc.
+    try { await navigator.share({ files: [file] }); } catch {}
+  } else {
+    // En computadora: lo descarga
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+}
+
+btnScan.onclick = () => stream ? stop() : start();
+$('#copy').onclick = copy;
+$('#csv').onclick = shareCSV;
+$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los códigos?')) { rows = []; render(); } };
+list.onclick = e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const i = +b.dataset.i, s = b.dataset.s;
+  if (s) rows[i].estado = rows[i].estado === s ? '' : s; // tocar de nuevo lo desmarca
+  else rows.splice(i, 1);
+  render();
+};
+document.onvisibilitychange = () => document.hidden && stop();
+
+render();
+</script>
+</body>
+</html>
