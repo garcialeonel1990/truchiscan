@@ -11,8 +11,8 @@
   h1 { font-size: 20px; margin: 4px 0 12px; }
   #cam { position: relative; aspect-ratio: 4/3; background: #000; border-radius: 12px; overflow: hidden; }
   #cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
-  #cam::after { content: ""; position: absolute; inset: 30% 10%; border: 3px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px #0006; transition: border-color .2s; }
-  #cam.hit::after { border-color: var(--ok); }
+  #guide { position: absolute; inset: 32% 6%; border: 3px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px #0006; }
+  #hint { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; color: #fff; font-size: 13px; text-shadow: 0 1px 2px #000; }
   .bar { display: flex; gap: 8px; margin: 10px 0; }
   button { flex: 1; padding: 14px; border: 0; border-radius: 10px; font: 600 15px system-ui; background: var(--accent); color: #fff; }
   button.sec { background: #8884; color: inherit; }
@@ -35,7 +35,11 @@
 <body>
 <h1>Escáner de códigos</h1>
 
-<div id="cam" hidden><video playsinline muted></video></div>
+<div id="cam" hidden>
+  <video playsinline muted></video>
+  <div id="guide"></div>
+  <div id="hint">Alejá el celular ~20 cm y centrá el código en el recuadro</div>
+</div>
 
 <div class="bar"><button id="scan">📷 Escanear</button></div>
 <div class="bar">
@@ -52,16 +56,19 @@
 const POLYFILL = 'https://fastly.jsdelivr.net/npm/barcode-detector@2/dist/es/pure.min.js';
 const KEY = 'scans';
 const ESTADOS = ['En stock', 'Asignada', 'Reparar'];
+const FORMATS = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'qr_code', 'data_matrix'];
+const TIMEOUT = 30000; // apaga la cámara si no lee nada en 30 s
 const $ = s => document.querySelector(s);
-const video = $('video'), cam = $('#cam'), list = $('#list'), btnScan = $('#scan');
+const video = $('video'), cam = $('#cam'), guide = $('#guide'), list = $('#list'), btnScan = $('#scan');
+const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
 
 let rows = JSON.parse(localStorage.getItem(KEY) || '[]');
-let stream, detector, timer, audio, last = '', lastT = 0;
+let stream, detector, timer, audio, t0;
 
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function render() {
-  // Lo último escaneado arriba (cerca de la cámara); los datos quedan en orden de escaneo
+  // Lo último escaneado arriba; los datos quedan en orden de escaneo
   list.innerHTML = rows.map((r, i) =>
     `<div class="row${r.estado ? '' : ' pend'}">
       <div class="top"><b>${i + 1}</b><span>${esc(r.code)}</span><button class="del" data-i="${i}" aria-label="Borrar">✕</button></div>
@@ -77,13 +84,11 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(tt);
-  tt = setTimeout(() => t.classList.remove('show'), 1500);
+  tt = setTimeout(() => t.classList.remove('show'), 1800);
 }
 
-function feedback() {
+function beep() {
   navigator.vibrate?.(80);
-  cam.classList.add('hit');
-  setTimeout(() => cam.classList.remove('hit'), 400);
   const o = audio.createOscillator();
   o.frequency.value = 1200;
   o.connect(audio.destination);
@@ -92,24 +97,33 @@ function feedback() {
 }
 
 function add(code) {
-  // Evita registrar el mismo código mientras sigue frente a la cámara
-  const now = Date.now(), same = code === last && now - lastT < 2000;
-  last = code; lastT = now;
-  if (same) return;
   if (rows.some(r => r.code === code)) return toast('Ya escaneado: ' + code);
   rows.push({ code, estado: '' });
   render();
-  feedback();
   toast('✓ ' + code);
+}
+
+// Recorta del video solo lo que está dentro del recuadro, a resolución completa
+function crop() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const c = cam.getBoundingClientRect(), g = guide.getBoundingClientRect();
+  const s = Math.max(c.width / vw, c.height / vh); // escala de object-fit: cover
+  const ox = (vw * s - c.width) / 2, oy = (vh * s - c.height) / 2;
+  const w = g.width / s, h = g.height / s;
+  canvas.width = w;
+  canvas.height = h;
+  ctx.drawImage(video, (g.left - c.left + ox) / s, (g.top - c.top + oy) / s, w, h, 0, 0, w, h);
+  return canvas;
 }
 
 async function loop() {
   if (!stream) return;
+  if (Date.now() - t0 > TIMEOUT) { stop(); return toast('Cámara apagada por inactividad'); }
   try {
-    const [hit] = await detector.detect(video);
-    if (hit) add(hit.rawValue);
+    const [hit] = video.videoWidth ? await detector.detect(crop()) : [];
+    if (hit) { beep(); stop(); return add(hit.rawValue); } // un código por escaneo
   } catch {}
-  timer = setTimeout(loop, 200);
+  timer = setTimeout(loop, 100);
 }
 
 async function start() {
@@ -118,13 +132,23 @@ async function start() {
     if (!detector) {
       // Nativo en Chrome/Android; en Safari/iOS se carga el polyfill solo si hace falta
       const BD = window.BarcodeDetector ?? (await import(POLYFILL)).BarcodeDetector;
-      detector = new BD();
+      const ok = await BD.getSupportedFormats();
+      detector = new BD({ formats: FORMATS.filter(f => ok.includes(f)) });
     }
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    // Zoom 2x y enfoque continuo si el celular lo permite: se escanea desde más lejos, donde sí enfoca
+    const track = stream.getVideoTracks()[0], caps = track.getCapabilities?.() ?? {}, adv = [];
+    if (caps.zoom) adv.push({ zoom: Math.min(2, caps.zoom.max) });
+    if (caps.focusMode?.includes('continuous')) adv.push({ focusMode: 'continuous' });
+    if (adv.length) await track.applyConstraints({ advanced: adv }).catch(() => {});
     video.srcObject = stream;
     await video.play();
     cam.hidden = false;
-    btnScan.textContent = '⏹ Detener';
+    btnScan.textContent = '⏹ Cancelar';
+    t0 = Date.now();
     loop();
   } catch (e) {
     toast('Error: ' + e.message);
@@ -136,6 +160,7 @@ function stop() {
   stream?.getTracks().forEach(t => t.stop());
   stream = null;
   clearTimeout(timer);
+  video.srcObject = null;
   cam.hidden = true;
   btnScan.textContent = '📷 Escanear';
 }
