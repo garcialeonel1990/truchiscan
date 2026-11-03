@@ -15,39 +15,61 @@
   button { flex: 1; max-width: 220px; padding: 22px; border: 0; border-radius: 14px; font: 600 19px system-ui; background: var(--accent); color: #fff; }
   button.sec { background: #8884; color: inherit; }
   #scan { max-width: 320px; padding: 28px; font-size: 23px; }
-  #msg { min-height: 1.3em; color: #888; font-size: 14px; word-break: break-all; }
-  ol { padding-left: 2.5em; font-family: ui-monospace, monospace; word-break: break-all; }
-  li { padding: 8px 0; border-bottom: 1px solid #8883; }
-  small { color: #888; font-family: system-ui; }
+  #msg { min-height: 1.3em; margin: 8px 0; text-align: center; color: #888; font-size: 14px; word-break: break-all; }
+  #card { margin: 12px 0; padding: 6px 14px; border-radius: 14px; background: #8882; }
+  .f { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+  .f + .f { border-top: 1px solid #8883; }
+  .f b { width: 56px; color: #888; font: 600 14px system-ui; }
+  .f span { flex: 1; font: 600 20px ui-monospace, monospace; word-break: break-all; }
+  button.mini { flex: none; padding: 10px 14px; font-size: 18px; border-radius: 10px; }
+  ol { padding-left: 2.5em; word-break: break-all; }
+  li { padding: 8px 0; border-bottom: 1px solid #8883; font-family: ui-monospace, monospace; }
+  li b { color: #888; font: 600 13px system-ui; }
 </style>
 </head>
 <body>
-<h1>Escáner de códigos</h1>
+<main id="home">
+  <h1>Escáner de códigos</h1>
+  <video playsinline muted autoplay hidden></video>
+  <div class="bar"><button id="scan">📷 Escanear</button></div>
+  <div id="msg"></div>
+  <div id="card" hidden>
+    <div class="f"><b>Tag</b><span id="tag"></span><button class="mini" data-f="tag" aria-label="Escanear tag">📷</button></div>
+    <div class="f"><b>Serial</b><span id="serial"></span><button class="mini" data-f="serial" aria-label="Escanear serial">📷</button></div>
+  </div>
+  <div class="bar"><button id="open" class="sec">📋 Ver lista (<span id="count">0</span>)</button></div>
+</main>
 
-<video playsinline muted autoplay hidden></video>
-<div class="bar"><button id="scan">📷 Escanear</button></div>
-<div id="msg"></div>
-<div class="bar">
-  <button id="csv" class="sec">📤 Exportar CSV (<span id="count">0</span>)</button>
-  <button id="clear" class="sec">🗑 Borrar</button>
-</div>
-<ol id="list" reversed></ol>
+<section id="panel" hidden>
+  <div class="bar"><button id="back" class="sec">← Volver</button></div>
+  <div class="bar">
+    <button id="csv">📤 Exportar CSV</button>
+    <button id="clear" class="sec">🗑 Borrar</button>
+  </div>
+  <ol id="list" reversed></ol>
+</section>
 
 <script type="module">
 const POLYFILL = 'https://fastly.jsdelivr.net/npm/barcode-detector@2/dist/es/pure.min.js';
 const KEY = 'codigos';
 const FORMATS = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'qr_code', 'data_matrix'];
 const $ = s => document.querySelector(s);
-const video = $('video'), btn = $('#scan'), list = $('#list'), msg = $('#msg');
+const video = $('video'), btn = $('#scan'), list = $('#list'), msg = $('#msg'), home = $('#home'), panel = $('#panel');
 
-let rows = JSON.parse(localStorage.getItem(KEY) || '[]');
-let stream, detector, audio, last;
+// Registros { tag, serial, date }; los guardados con la versión anterior pasan a Tag
+let rows = JSON.parse(localStorage.getItem(KEY) || '[]').map(r => r.code ? { tag: r.code, serial: '', date: r.date } : r);
+let cur = rows.length - 1; // registro que se muestra y completa
+let stream, detector, audio, target;
 
-const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function render() {
-  list.innerHTML = rows.map(r => `<li>${esc(r.code)} <small>${r.type}</small></li>`).reverse().join('');
+  list.innerHTML = rows.map(r =>
+    `<li><b>Tag</b> ${esc(r.tag || '—')}<br><b>Serial</b> ${esc(r.serial || '—')}</li>`).reverse().join('');
   $('#count').textContent = rows.length;
+  const r = rows[cur];
+  $('#card').hidden = !r;
+  if (r) { $('#tag').textContent = r.tag || '—'; $('#serial').textContent = r.serial || '—'; }
   localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
 }
 
@@ -70,27 +92,34 @@ async function getDetector() {
   return detector;
 }
 
-// Lectura continua sobre el cuadro completo del video; la cámara queda abierta
+// Guarda el código leído: registro nuevo (Tag) o campo del registro actual
+function save(code) {
+  if (rows.some(r => r.tag === code || r.serial === code)) return (msg.textContent = 'Ya está en la lista: ' + code);
+  if (target === 'new') {
+    rows.push({ tag: code, serial: '', date: new Date().toLocaleString('es-AR') });
+    cur = rows.length - 1;
+  } else rows[cur][target] = code;
+  beep();
+  render();
+  msg.textContent = '';
+}
+
+// Lee sobre el cuadro completo y cierra la cámara al primer código
 async function loop(s) {
   while (stream === s) {
     try {
       if (video.readyState >= 2) {
-        for (const { rawValue: code, format } of await detector.detect(video)) {
-          if (code === last) continue; // el mismo código sigue frente a la cámara
-          last = code;
-          if (rows.some(r => r.code === code)) { msg.textContent = 'Ya está en la lista: ' + code; continue; }
-          rows.push({ code, type: format, date: new Date().toLocaleString('es-AR') });
-          render();
-          beep();
-          msg.textContent = '✓ ' + code;
-        }
+        const [hit] = await detector.detect(video);
+        if (hit) { stop(); return save(hit.rawValue); }
       }
     } catch (e) { msg.textContent = 'Error de lectura: ' + e.message; }
     await new Promise(r => setTimeout(r, 150));
   }
 }
 
-async function start() {
+async function start(t) {
+  stop();
+  target = t;
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('la cámara requiere abrir la página con https://');
     audio ??= new AudioContext(); // se crea tras un toque (requisito de iOS)
@@ -104,8 +133,7 @@ async function start() {
     video.hidden = false;
     await video.play();
     btn.textContent = '⏹ Detener';
-    msg.textContent = 'Apuntá a un código';
-    last = null;
+    msg.textContent = t === 'new' ? 'Apuntá al Tag' : `Apuntá al ${t === 'tag' ? 'Tag' : 'Serial'}`;
     loop(stream);
   } catch (e) {
     stop();
@@ -119,12 +147,13 @@ function stop() {
   video.srcObject = null;
   video.hidden = true;
   btn.textContent = '📷 Escanear';
+  msg.textContent = '';
 }
 
 async function exportCSV() {
-  if (!rows.length) return (msg.textContent = 'No hay códigos');
+  if (!rows.length) return alert('No hay registros');
   const q = s => `"${String(s).replace(/"/g, '""')}"`;
-  const lines = [['Código', 'Tipo', 'Fecha'], ...rows.map(r => [r.code, r.type, r.date])];
+  const lines = [['Tag', 'Serial', 'Fecha'], ...rows.map(r => [r.tag, r.serial, r.date])];
   // BOM + ";" para que Excel en español lo abra con acentos y columnas bien
   const csv = '\ufeff' + lines.map(l => l.map(q).join(';')).join('\r\n');
   const name = `escaneos_${new Date().toISOString().slice(0, 10)}.csv`;
@@ -140,9 +169,12 @@ async function exportCSV() {
   }
 }
 
-btn.onclick = () => stream ? stop() : start();
+btn.onclick = () => stream ? stop() : start('new');
+$('#card').onclick = e => { const f = e.target.closest('.mini')?.dataset.f; if (f) start(f); };
+$('#open').onclick = () => { stop(); home.hidden = true; panel.hidden = false; };
+$('#back').onclick = () => { panel.hidden = true; home.hidden = false; };
 $('#csv').onclick = exportCSV;
-$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los códigos?')) { rows = []; render(); msg.textContent = ''; } };
+$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los registros?')) { rows = []; cur = -1; render(); } };
 document.onvisibilitychange = () => document.hidden && stop();
 
 render();
