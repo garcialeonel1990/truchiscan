@@ -7,13 +7,14 @@
 <style>
   :root { color-scheme: light dark; --accent: #0a84ff; }
   * { box-sizing: border-box; }
-  body { margin: 0 auto; max-width: 600px; padding: 12px; font: 16px -apple-system, system-ui, sans-serif; }
+  body { margin: 0 auto; max-width: 600px; padding: 40px 12px 12px; font: 16px -apple-system, system-ui, sans-serif; }
   h1 { font-size: 20px; margin: 4px 0 12px; }
   video { display: block; width: 100%; height: 50vh; object-fit: cover; background: #000; border-radius: 12px; }
   video[hidden] { display: none; }
-  .bar { display: flex; gap: 8px; margin: 10px 0; }
-  button { flex: 1; padding: 14px; border: 0; border-radius: 10px; font: 600 15px system-ui; background: var(--accent); color: #fff; }
+  .bar { display: flex; justify-content: center; gap: 10px; margin: 12px 0; }
+  button { flex: 1; max-width: 220px; padding: 22px; border: 0; border-radius: 14px; font: 600 19px system-ui; background: var(--accent); color: #fff; }
   button.sec { background: #8884; color: inherit; }
+  #scan { max-width: 320px; padding: 28px; font-size: 23px; }
   #msg { min-height: 1.3em; color: #888; font-size: 14px; word-break: break-all; }
   ol { padding-left: 2.5em; font-family: ui-monospace, monospace; word-break: break-all; }
   li { padding: 8px 0; border-bottom: 1px solid #8883; }
