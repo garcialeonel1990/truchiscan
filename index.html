@@ -26,12 +26,24 @@
   #card { margin: 12px 0; padding: 6px 14px; border-radius: 14px; background: #8882; }
   .f { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
   .f + .f { border-top: 1px solid #8883; }
-  .f b { width: 56px; color: #888; font: 600 14px system-ui; }
+  .f b { width: 76px; color: #888; font: 600 14px system-ui; }
   .f span { flex: 1; font: 600 20px ui-monospace, monospace; word-break: break-all; }
+  select { flex: 1; min-width: 0; padding: 10px; border: 1px solid #8886; border-radius: 10px; background: #8881; color: inherit; font: 600 17px system-ui; }
+  li select { width: 100%; margin-top: 8px; }
+  li.miss { border-left: 4px solid #ff9f0a; padding-left: 8px; }
+  li.miss select { border-color: #ff9f0a; }
   button.mini { flex: none; padding: 10px 14px; font-size: 18px; border-radius: 10px; }
   ol { padding-left: 2.5em; word-break: break-all; }
   li { padding: 8px 0; border-bottom: 1px solid #8883; font-family: ui-monospace, monospace; }
   li b { color: #888; font: 600 13px system-ui; }
+  button.danger { background: #ff453a; }
+  button:disabled { opacity: .4; }
+  #allrow { display: flex; align-items: center; gap: 12px; padding: 10px 0 10px 2.5em; border-bottom: 1px solid #8883; font-weight: 600; }
+  #allrow[hidden] { display: none; }
+  li label { display: flex; align-items: center; gap: 12px; }
+  /* Selector redondo */
+  input[type=checkbox] { -webkit-appearance: none; appearance: none; flex: none; width: 26px; height: 26px; margin: 0; border: 2px solid #8889; border-radius: 50%; }
+  input[type=checkbox]:checked { border-color: var(--accent); background: radial-gradient(var(--accent) 0 45%, transparent 50%); }
 </style>
 </head>
 <body>
@@ -45,16 +57,22 @@
   <div id="card" hidden>
     <div class="f"><b>Tag</b><span id="tag"></span><button class="mini" data-f="tag" aria-label="Escanear tag">📷</button></div>
     <div class="f"><b>Serial</b><span id="serial"></span><button class="mini" data-f="serial" aria-label="Escanear serial">📷</button></div>
+    <div class="f"><b>Ubicación</b><select id="ubic"></select></div>
   </div>
   <div class="bar"><button id="open" class="sec">📋 Ver lista (<span id="count">0</span>)</button></div>
 </main>
 
 <section id="panel" hidden>
   <div class="bar"><button id="back" class="sec">← Volver</button></div>
-  <div class="bar">
+  <div class="bar" id="acts">
     <button id="csv">📤 Exportar CSV</button>
     <button id="clear" class="sec">🗑 Borrar</button>
   </div>
+  <div class="bar" id="selbar" hidden>
+    <button id="del" class="danger">🗑 Borrar (<span id="n">0</span>)</button>
+    <button id="cancel" class="sec">Cancelar</button>
+  </div>
+  <label id="allrow" hidden><input type="checkbox" id="all"> Seleccionar todos</label>
   <ol id="list" reversed></ol>
 </section>
 
@@ -70,16 +88,30 @@ let video; // se crea uno nuevo en cada apertura: reusar el mismo en Safari deja
 let rows = JSON.parse(localStorage.getItem(KEY) || '[]').map(r => r.code ? { tag: r.code, serial: '', date: r.date } : r);
 let cur = rows.length - 1; // registro que se muestra y completa
 let stream, detector, audio, target;
+let sel = null; // registros marcados para borrar (índices); null = modo normal
+const UBIC = ['Depósito 1ro', 'Depósito 5to', 'Reparar', 'Asignada'];
+const opts = v => '<option value="">Elegí ubicación…</option>' + UBIC.map(u => `<option${u === v ? ' selected' : ''}>${u}</option>`).join('');
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function render() {
-  list.innerHTML = rows.map(r =>
-    `<li><b>Tag</b> ${esc(r.tag || '—')}<br><b>Serial</b> ${esc(r.serial || '—')}</li>`).reverse().join('');
+  list.innerHTML = rows.map((r, i) => {
+    const txt = `<span><b>Tag</b> ${esc(r.tag || '—')}<br><b>Serial</b> ${esc(r.serial || '—')}</span>`;
+    return sel
+      ? `<li><label><input type="checkbox" data-i="${i}"${sel.has(i) ? ' checked' : ''}>${txt}</label></li>`
+      : `<li${r.ubicacion ? '' : ' class="miss"'}>${txt}<select data-u="${i}">${opts(r.ubicacion)}</select></li>`;
+  }).reverse().join('');
+  $('#acts').hidden = !!sel;
+  $('#selbar').hidden = $('#allrow').hidden = !sel;
+  if (sel) {
+    $('#n').textContent = sel.size;
+    $('#del').disabled = !sel.size;
+    $('#all').checked = sel.size === rows.length;
+  }
   $('#count').textContent = rows.length;
   const r = rows[cur];
   $('#card').hidden = !r;
-  if (r) { $('#tag').textContent = r.tag || '—'; $('#serial').textContent = r.serial || '—'; }
+  if (r) { $('#tag').textContent = r.tag || '—'; $('#serial').textContent = r.serial || '—'; $('#ubic').innerHTML = opts(r.ubicacion); }
   localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
 }
 
@@ -222,10 +254,22 @@ function stop() {
   msg.textContent = '';
 }
 
+// Mismas columnas y en el mismo orden que "Inventario IT - Planilla para importar.xlsx".
+// Por ahora se completan Tag y N° de serie; Ubicación queda vacía hasta que la app la pida.
+const COLS = ['Tag', 'Usuario', 'Email', 'Posición', 'Área', 'Contratación', 'Tipo', 'Marca', 'Modelo', 'Año',
+  'N° de serie', 'Estado', 'Condición', 'Ubicación', 'Fecha de compra', 'Costo', 'Moneda', 'Proveedor', 'Factura',
+  'Link factura', 'Garantía hasta', 'Notas', 'RAM', 'Disco', 'N° de solicitud de gasto', 'N° de orden de compra'];
+
 async function exportCSV() {
   if (!rows.length) return alert('No hay registros');
-  const q = s => `"${String(s).replace(/"/g, '""')}"`;
-  const lines = [['Tag', 'Serial', 'Fecha'], ...rows.map(r => [r.tag, r.serial, r.date])];
+  const faltan = rows.filter(r => !r.ubicacion).length;
+  if (faltan) {
+    alert(`Falta la ubicación en ${faltan} registro${faltan > 1 ? 's' : ''}. Completala antes de exportar.`);
+    return list.querySelector('.miss')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  const q = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const data = rows.map(r => ({ 'Tag': r.tag, 'N° de serie': r.serial, 'Ubicación': r.ubicacion }));
+  const lines = [COLS, ...data.map(d => COLS.map(c => d[c]))];
   // BOM + ";" para que Excel en español lo abra con acentos y columnas bien
   const csv = '\ufeff' + lines.map(l => l.map(q).join(';')).join('\r\n');
   const name = `escaneos_${new Date().toISOString().slice(0, 10)}.csv`;
@@ -245,9 +289,33 @@ btn.onclick = () => stream ? stop() : start('new');
 $('#card').onclick = e => { const f = e.target.closest('.mini')?.dataset.f; if (f) start(f); };
 $('#zoom').onclick = e => { const z = e.target.closest('button')?.dataset.z; if (z) setZoom(+z); };
 $('#open').onclick = () => { stop(); home.hidden = true; panel.hidden = false; };
-$('#back').onclick = () => { panel.hidden = true; home.hidden = false; };
+$('#back').onclick = () => { sel = null; render(); panel.hidden = true; home.hidden = false; };
 $('#csv').onclick = exportCSV;
-$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los registros?')) { rows = []; cur = -1; render(); } };
+// Ubicación: desde la ficha (registro actual) o desde cada registro de la lista
+$('#ubic').onchange = e => { rows[cur].ubicacion = e.target.value; render(); };
+list.addEventListener('change', e => {
+  const i = e.target.dataset.u;
+  if (i != null) { rows[+i].ubicacion = e.target.value; render(); }
+});
+// Borrar: entra en modo selección (uno, varios o todos)
+$('#clear').onclick = () => { if (!rows.length) return alert('No hay registros'); sel = new Set(); render(); };
+$('#cancel').onclick = () => { sel = null; render(); };
+$('#all').onchange = e => { sel = new Set(e.target.checked ? rows.keys() : []); render(); };
+list.onchange = e => {
+  const i = e.target.dataset.i;
+  if (i == null) return;
+  e.target.checked ? sel.add(+i) : sel.delete(+i);
+  render();
+};
+$('#del').onclick = () => {
+  const n = sel.size;
+  if (!n || !confirm(`¿Borrar ${n} registro${n > 1 ? 's' : ''}?`)) return;
+  const shown = rows[cur];
+  rows = rows.filter((_, i) => !sel.has(i));
+  cur = rows.indexOf(shown); // si se borró el que estaba en pantalla, la ficha se oculta
+  sel = null;
+  render();
+};
 document.onvisibilitychange = () => document.hidden && stop();
 
 render();
