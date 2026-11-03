@@ -5,105 +5,49 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Escáner</title>
 <style>
-  :root { color-scheme: light dark; --accent: #0a84ff; --ok: #30d158; --warn: #ff9f0a; --danger: #ff453a; }
+  :root { color-scheme: light dark; --accent: #0a84ff; }
   * { box-sizing: border-box; }
   body { margin: 0 auto; max-width: 600px; padding: 12px; font: 16px -apple-system, system-ui, sans-serif; }
   h1 { font-size: 20px; margin: 4px 0 12px; }
-  #cam { position: relative; height: 60vh; background: #000; border-radius: 16px; overflow: hidden; touch-action: none; }
-  #cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  /* Recuadro de lectura: esquinas blancas + línea roja que barre, fuera del recuadro se oscurece */
-  #guide { position: absolute; inset: 33% 7%; border-radius: 4px; box-shadow: 0 0 0 999px #0009;
-    --c: linear-gradient(#fff 0 0); --l: 28px; --t: 4px;
-    background: var(--c) top left / var(--l) var(--t), var(--c) top left / var(--t) var(--l),
-      var(--c) top right / var(--l) var(--t), var(--c) top right / var(--t) var(--l),
-      var(--c) bottom left / var(--l) var(--t), var(--c) bottom left / var(--t) var(--l),
-      var(--c) bottom right / var(--l) var(--t), var(--c) bottom right / var(--t) var(--l);
-    background-repeat: no-repeat; }
-  #guide::after { content: ''; position: absolute; left: 6%; right: 6%; height: 2px; background: var(--danger); box-shadow: 0 0 10px var(--danger); animation: sweep 1.6s ease-in-out infinite alternate; }
-  @keyframes sweep { from { top: 12%; } to { top: 88%; } }
-  .chip { position: absolute; top: 12px; flex: none; display: flex; align-items: center; justify-content: center; height: 36px; min-width: 36px; padding: 0 12px; border-radius: 18px; background: #0007; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: #fff; font: 600 14px system-ui; }
-  #zoom { left: 12px; }
-  #flip { right: 12px; padding: 0; }
-  #hint { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); width: max-content; max-width: 90%; padding: 6px 12px; border-radius: 14px; background: #0007; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: #fff; font-size: 13px; text-align: center; }
+  video { display: block; width: 100%; height: 50vh; object-fit: cover; background: #000; border-radius: 12px; }
+  video[hidden] { display: none; }
   .bar { display: flex; gap: 8px; margin: 10px 0; }
   button { flex: 1; padding: 14px; border: 0; border-radius: 10px; font: 600 15px system-ui; background: var(--accent); color: #fff; }
   button.sec { background: #8884; color: inherit; }
-  .row { padding: 10px 0 10px 10px; border-bottom: 1px solid #8883; border-left: 4px solid transparent; }
-  .row.pend { border-left-color: var(--warn); }
-  .top { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, monospace; word-break: break-all; }
-  .top b { color: #888; font-weight: 400; }
-  .top span { flex: 1; }
-  .del { flex: 0; padding: 4px 8px; background: none; color: var(--danger); font-size: 18px; }
-  .st { display: flex; gap: 6px; margin-top: 8px; }
-  .st button { padding: 10px 4px; font-size: 14px; background: #8882; color: inherit; }
-  .st button.on { color: #fff; }
-  .st button.on[data-s="En stock"] { background: var(--ok); }
-  .st button.on[data-s="Asignada"] { background: var(--accent); }
-  .st button.on[data-s="Reparar"] { background: var(--warn); }
-  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #000c; color: #fff; padding: 10px 18px; border-radius: 20px; opacity: 0; transition: opacity .3s; pointer-events: none; }
-  #toast.show { opacity: 1; }
+  #msg { min-height: 1.3em; color: #888; font-size: 14px; word-break: break-all; }
+  ol { padding-left: 2.5em; font-family: ui-monospace, monospace; word-break: break-all; }
+  li { padding: 8px 0; border-bottom: 1px solid #8883; }
+  small { color: #888; font-family: system-ui; }
 </style>
 </head>
 <body>
 <h1>Escáner de códigos</h1>
 
-<div id="cam" hidden>
-  <video playsinline muted></video>
-  <div id="guide"></div>
-  <button id="flip" class="chip" aria-label="Cambiar cámara"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg></button>
-  <div id="zoom" class="chip">1.0x</div>
-  <div id="hint">Pellizcá para zoom · ¿Borroso? Cambiá de cámara o usá Foto</div>
-</div>
-
+<video playsinline muted autoplay hidden></video>
+<div class="bar"><button id="scan">📷 Escanear</button></div>
+<div id="msg"></div>
 <div class="bar">
-  <button id="scan">📷 Escanear</button>
-  <button id="photo" class="sec">📸 Foto</button>
-  <input id="file" type="file" accept="image/*" capture="environment" hidden>
+  <button id="csv" class="sec">📤 Exportar CSV (<span id="count">0</span>)</button>
+  <button id="clear" class="sec">🗑 Borrar</button>
 </div>
-<div class="bar">
-  <button id="copy">📋 Copiar (<span id="count">0</span>)</button>
-  <button id="clear" class="sec">🗑 Borrar todo</button>
-</div>
-<div class="bar"><button id="csv" class="sec">📤 Compartir CSV</button></div>
-
-<div id="list"></div>
-
-<div id="toast"></div>
+<ol id="list" reversed></ol>
 
 <script type="module">
 const POLYFILL = 'https://fastly.jsdelivr.net/npm/barcode-detector@2/dist/es/pure.min.js';
-const KEY = 'scans', CAM = 'camId';
-const ESTADOS = ['En stock', 'Asignada', 'Reparar'];
+const KEY = 'codigos';
 const FORMATS = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'qr_code', 'data_matrix'];
-const TIMEOUT = 30000; // apaga la cámara si no lee nada en 30 s
-const SIZE = { width: { ideal: 1920 }, height: { ideal: 1080 } };
 const $ = s => document.querySelector(s);
-const video = $('video'), cam = $('#cam'), guide = $('#guide'), list = $('#list'), btnScan = $('#scan');
-const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+const video = $('video'), btn = $('#scan'), list = $('#list'), msg = $('#msg');
 
 let rows = JSON.parse(localStorage.getItem(KEY) || '[]');
-let stream, detector, timer, audio, t0, n = 0;
+let stream, detector, audio, last;
 
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function render() {
-  // Lo último escaneado arriba; los datos quedan en orden de escaneo
-  list.innerHTML = rows.map((r, i) =>
-    `<div class="row${r.estado ? '' : ' pend'}">
-      <div class="top"><b>${i + 1}</b><span>${esc(r.code)}</span><button class="del" data-i="${i}" aria-label="Borrar">✕</button></div>
-      <div class="st">${ESTADOS.map(s => `<button data-i="${i}" data-s="${s}" class="${r.estado === s ? 'on' : ''}">${s}</button>`).join('')}</div>
-    </div>`).reverse().join('');
+  list.innerHTML = rows.map(r => `<li>${esc(r.code)} <small>${r.type}</small></li>`).reverse().join('');
   $('#count').textContent = rows.length;
   localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
-}
-
-let tt;
-function toast(msg) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(tt);
-  tt = setTimeout(() => t.classList.remove('show'), 1800);
 }
 
 function beep() {
@@ -115,17 +59,9 @@ function beep() {
   o.stop(audio.currentTime + 0.08);
 }
 
-function add(code) {
-  beep();
-  if (rows.some(r => r.code === code)) return toast('Ya escaneado: ' + code);
-  rows.push({ code, estado: '' });
-  render();
-  toast('✓ ' + code);
-}
-
 async function getDetector() {
   if (!detector) {
-    // Nativo en Chrome/Android; en Safari/iOS se carga el polyfill solo si hace falta
+    // Nativo en Chrome/Android; en Safari/iOS se carga el polyfill
     const BD = window.BarcodeDetector ?? (await import(POLYFILL)).BarcodeDetector;
     const ok = await BD.getSupportedFormats();
     detector = new BD({ formats: FORMATS.filter(f => ok.includes(f)) });
@@ -133,157 +69,69 @@ async function getDetector() {
   return detector;
 }
 
-// Recorta del video solo lo que está dentro del recuadro, a resolución completa (códigos lejanos/chicos)
-// Usa el tamaño del video en pantalla, así también funciona con el zoom digital
-function crop() {
-  const vw = video.videoWidth, vh = video.videoHeight;
-  const c = video.getBoundingClientRect(), g = guide.getBoundingClientRect();
-  const s = Math.max(c.width / vw, c.height / vh); // escala de object-fit: cover
-  const ox = (vw * s - c.width) / 2, oy = (vh * s - c.height) / 2;
-  const w = g.width / s, h = g.height / s;
-  canvas.width = w;
-  canvas.height = h;
-  ctx.drawImage(video, (g.left - c.left + ox) / s, (g.top - c.top + oy) / s, w, h, 0, 0, w, h);
-  return canvas;
-}
-
-async function loop() {
-  if (!stream) return;
-  if (Date.now() - t0 > TIMEOUT) { stop(); return toast('Cámara apagada por inactividad'); }
-  try {
-    // Alterna recuadro / imagen completa: de cerca el código suele ser más grande que el recuadro
-    const [hit] = video.videoWidth ? await detector.detect(++n % 2 ? crop() : video) : [];
-    if (hit) { stop(); return add(hit.rawValue); } // un código por escaneo
-  } catch {}
-  timer = setTimeout(loop, 100);
-}
-
-async function openCam() {
-  stream?.getTracks().forEach(t => t.stop()); // iOS permite una sola cámara a la vez
-  const id = localStorage.getItem(CAM);
-  // Enfoque continuo pedido al abrir: cambiar la cámara ya abierta (applyConstraints) en iPhone
-  // deja la imagen chica y descentrada dentro de la ventana
-  const opts = { ...SIZE, advanced: [{ focusMode: 'continuous' }] };
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: id ? { deviceId: { exact: id }, ...opts } : { facingMode: 'environment', ...opts }
-    });
-  } catch (e) {
-    if (!id) throw e;
-    localStorage.removeItem(CAM); // la cámara guardada ya no existe: vuelve a la principal
-    return openCam();
+// Lectura continua sobre el cuadro completo del video; la cámara queda abierta
+async function loop(s) {
+  while (stream === s) {
+    try {
+      if (video.readyState >= 2) {
+        for (const { rawValue: code, format } of await detector.detect(video)) {
+          if (code === last) continue; // el mismo código sigue frente a la cámara
+          last = code;
+          if (rows.some(r => r.code === code)) { msg.textContent = 'Ya está en la lista: ' + code; continue; }
+          rows.push({ code, type: format, date: new Date().toLocaleString('es-AR') });
+          render();
+          beep();
+          msg.textContent = '✓ ' + code;
+        }
+      }
+    } catch (e) { msg.textContent = 'Error de lectura: ' + e.message; }
+    await new Promise(r => setTimeout(r, 150));
   }
-  video.srcObject = stream;
-  setZoom(1); // la cámara nueva arranca sin zoom
-  await video.play();
 }
-
-// Zoom con dos dedos: amplía la imagen en pantalla (no toca la cámara, así no pierde resolución
-// ni se deforma). El recorte se sigue tomando del video a resolución completa.
-let zoom = 1, z0, d0;
-function setZoom(z) {
-  zoom = Math.min(Math.max(z, 1), 5);
-  video.style.transform = zoom > 1 ? `scale(${zoom})` : '';
-  $('#zoom').textContent = zoom.toFixed(1) + 'x';
-}
-const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-cam.addEventListener('touchstart', e => { if (e.touches.length === 2) { d0 = dist(e.touches); z0 = zoom; } }, { passive: true });
-cam.addEventListener('touchmove', e => {
-  if (e.touches.length !== 2 || !d0) return;
-  e.preventDefault(); // evita que se agrande la página entera
-  setZoom(z0 * dist(e.touches) / d0);
-  t0 = Date.now(); // mientras ajusta el zoom no se apaga por inactividad
-}, { passive: false });
-cam.addEventListener('touchend', e => { if (e.touches.length < 2) d0 = null; });
-cam.addEventListener('gesturestart', e => e.preventDefault()); // Safari/iOS
 
 async function start() {
   try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('la cámara requiere abrir la página con https://');
     audio ??= new AudioContext(); // se crea tras un toque (requisito de iOS)
+    msg.textContent = 'Abriendo cámara…';
     await getDetector();
-    await openCam();
-    cam.hidden = false;
-    btnScan.textContent = '⏹ Cancelar';
-    t0 = Date.now();
-    loop();
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    video.srcObject = stream;
+    video.hidden = false;
+    await video.play();
+    btn.textContent = '⏹ Detener';
+    msg.textContent = 'Apuntá a un código';
+    last = null;
+    loop(stream);
   } catch (e) {
-    toast('Error: ' + e.message);
     stop();
+    msg.textContent = 'Error: ' + e.message;
   }
 }
 
 function stop() {
   stream?.getTracks().forEach(t => t.stop());
   stream = null;
-  clearTimeout(timer);
   video.srcObject = null;
-  cam.hidden = true;
-  btnScan.textContent = '📷 Escanear';
+  video.hidden = true;
+  btn.textContent = '📷 Escanear';
 }
 
-// Recorre las cámaras traseras (en iPhone Pro, la ultra gran angular enfoca a 2 cm) y recuerda la elegida
-async function flip() {
-  const cams = (await navigator.mediaDevices.enumerateDevices())
-    .filter(d => d.kind === 'videoinput' && !/front|frontal|delanter|facetime/i.test(d.label));
-  if (cams.length < 2) return toast('No hay otra cámara disponible');
-  const cur = stream.getVideoTracks()[0].getSettings().deviceId;
-  const next = cams[(cams.findIndex(c => c.deviceId === cur) + 1) % cams.length];
-  localStorage.setItem(CAM, next.deviceId);
-  try { await openCam(); t0 = Date.now(); toast(next.label || 'Cámara cambiada'); }
-  catch (e) { toast('Error: ' + e.message); stop(); }
-}
-
-// Foto con la app Cámara de iOS: toca para enfocar y usa macro automático en los Pro
-async function fromPhoto(e) {
-  const f = e.target.files[0];
-  e.target.value = '';
-  if (!f) return;
-  try {
-    const [hit] = await (await getDetector()).detect(await createImageBitmap(f));
-    hit ? add(hit.rawValue) : toast('No se encontró un código en la foto');
-  } catch (err) { toast('Error: ' + err.message); }
-}
-
-async function copy() {
-  if (!rows.length) return toast('No hay datos');
-  const text = rows.map(r => `${r.code} - ${r.estado || 'Sin estado'}`).join('\n');
-  const html = '<table border="1"><tr><th>Número</th><th>Estado</th></tr>' +
-    rows.map(r => `<tr><td>${esc(r.code)}</td><td>${r.estado}</td></tr>`).join('') + '</table>';
-  try {
-    // Teams usa la versión HTML (tabla); WhatsApp usa el texto plano
-    await navigator.clipboard.write([new ClipboardItem({
-      'text/plain': new Blob([text], { type: 'text/plain' }),
-      'text/html': new Blob([html], { type: 'text/html' })
-    })]);
-  } catch {
-    try { await navigator.clipboard.writeText(text); }
-    catch {
-      const t = document.createElement('textarea');
-      t.value = text;
-      document.body.append(t);
-      t.select();
-      document.execCommand('copy');
-      t.remove();
-    }
-  }
-  toast('Copiado ✓');
-}
-
-async function shareCSV() {
-  if (!rows.length) return toast('No hay datos');
+async function exportCSV() {
+  if (!rows.length) return (msg.textContent = 'No hay códigos');
   const q = s => `"${String(s).replace(/"/g, '""')}"`;
-  const lines = [['Número', 'Estado'], ...rows.map(r => [r.code, r.estado])];
+  const lines = [['Código', 'Tipo', 'Fecha'], ...rows.map(r => [r.code, r.type, r.date])];
   // BOM + ";" para que Excel en español lo abra con acentos y columnas bien
   const csv = '\ufeff' + lines.map(l => l.map(q).join(';')).join('\r\n');
   const name = `escaneos_${new Date().toISOString().slice(0, 10)}.csv`;
   const file = new File([csv], name, { type: 'text/csv' });
   if (navigator.canShare?.({ files: [file] })) {
-    // Abre el menú Compartir del celular → Teams, WhatsApp, Mail, etc.
-    try { await navigator.share({ files: [file] }); } catch {}
+    try { await navigator.share({ files: [file] }); } catch {} // celular: menú Compartir
   } else {
-    // En computadora: lo descarga
-    const a = document.createElement('a');
+    const a = document.createElement('a'); // computadora: descarga
     a.href = URL.createObjectURL(file);
     a.download = name;
     a.click();
@@ -291,21 +139,9 @@ async function shareCSV() {
   }
 }
 
-btnScan.onclick = () => stream ? stop() : start();
-$('#flip').onclick = flip;
-$('#photo').onclick = () => { audio ??= new AudioContext(); stop(); $('#file').click(); };
-$('#file').onchange = fromPhoto;
-$('#copy').onclick = copy;
-$('#csv').onclick = shareCSV;
-$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los códigos?')) { rows = []; render(); } };
-list.onclick = e => {
-  const b = e.target.closest('button');
-  if (!b) return;
-  const i = +b.dataset.i, s = b.dataset.s;
-  if (s) rows[i].estado = rows[i].estado === s ? '' : s; // tocar de nuevo lo desmarca
-  else rows.splice(i, 1);
-  render();
-};
+btn.onclick = () => stream ? stop() : start();
+$('#csv').onclick = exportCSV;
+$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los códigos?')) { rows = []; render(); msg.textContent = ''; } };
 document.onvisibilitychange = () => document.hidden && stop();
 
 render();
