@@ -12,16 +12,21 @@
   #cam { position: relative; aspect-ratio: 4/3; background: #000; border-radius: 12px; overflow: hidden; }
   #cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
   #guide { position: absolute; inset: 32% 6%; border: 3px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px #0006; }
+  #cam.tag #guide { border-color: var(--warn); }
   #hint { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; color: #fff; font-size: 13px; text-shadow: 0 1px 2px #000; }
+  #step { font-size: 15px; }
   #flip { position: absolute; top: 8px; right: 8px; padding: 8px 12px; background: #0009; }
   .bar { display: flex; gap: 8px; margin: 10px 0; }
   button { flex: 1; padding: 14px; border: 0; border-radius: 10px; font: 600 15px system-ui; background: var(--accent); color: #fff; }
   button.sec { background: #8884; color: inherit; }
   .row { padding: 10px 0 10px 10px; border-bottom: 1px solid #8883; border-left: 4px solid transparent; }
   .row.pend { border-left-color: var(--warn); }
+  .row.now { border-left-color: var(--accent); background: #0a84ff14; }
   .top { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, monospace; word-break: break-all; }
   .top b { color: #888; font-weight: 400; }
-  .top span { flex: 1; }
+  .top span { flex: 1; line-height: 1.6; }
+  .top small { display: inline-block; width: 34px; color: #888; font-size: 11px; }
+  .top .tag { padding: 4px 10px; font-size: 13px; background: var(--warn); }
   .del { flex: 0; padding: 4px 8px; background: none; color: var(--danger); font-size: 18px; }
   .st { display: flex; gap: 6px; margin-top: 8px; }
   .st button { padding: 10px 4px; font-size: 14px; background: #8882; color: inherit; }
@@ -40,7 +45,7 @@
   <video playsinline muted></video>
   <div id="guide"></div>
   <button id="flip" aria-label="Cambiar cámara">🔄</button>
-  <div id="hint">Si se ve borroso: probá 🔄 otra cámara o usá 📸 Foto</div>
+  <div id="hint"><b id="step"></b><br>Si se ve borroso: probá 🔄 otra cámara o usá 📸 Foto</div>
 </div>
 
 <div class="bar">
@@ -68,20 +73,34 @@ const $ = s => document.querySelector(s);
 const video = $('video'), cam = $('#cam'), guide = $('#guide'), list = $('#list'), btnScan = $('#scan');
 const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-let rows = JSON.parse(localStorage.getItem(KEY) || '[]');
+// Migra datos guardados con la versión anterior ({ code, estado })
+let rows = JSON.parse(localStorage.getItem(KEY) || '[]')
+  .map(r => ({ serial: r.serial ?? r.code, tag: r.tag ?? '', estado: r.estado ?? '' }));
+let pair = null; // índice de la fila que espera su TAG
 let stream, detector, timer, audio, t0, n = 0;
 
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Paso actual: 1) Serial Number → 2) TAG del mismo equipo
+function ui() {
+  const p = rows[pair];
+  $('#step').textContent = p ? `Paso 2/2: TAG de ${p.serial}` : 'Paso 1/2: Serial Number';
+  cam.classList.toggle('tag', !!p);
+  btnScan.textContent = stream ? '⏹ Cancelar' : p ? '🏷 Escanear TAG' : '📷 Escanear';
+}
+
 function render() {
   // Lo último escaneado arriba; los datos quedan en orden de escaneo
   list.innerHTML = rows.map((r, i) =>
-    `<div class="row${r.estado ? '' : ' pend'}">
-      <div class="top"><b>${i + 1}</b><span>${esc(r.code)}</span><button class="del" data-i="${i}" aria-label="Borrar">✕</button></div>
+    `<div class="row${i === pair ? ' now' : r.tag && r.estado ? '' : ' pend'}">
+      <div class="top"><b>${i + 1}</b>
+        <span><small>SN</small>${esc(r.serial)}<br><small>TAG</small>${r.tag ? esc(r.tag) : `<button class="tag" data-i="${i}" data-t>🏷 Escanear TAG</button>`}</span>
+        <button class="del" data-i="${i}" aria-label="Borrar">✕</button></div>
       <div class="st">${ESTADOS.map(s => `<button data-i="${i}" data-s="${s}" class="${r.estado === s ? 'on' : ''}">${s}</button>`).join('')}</div>
     </div>`).reverse().join('');
   $('#count').textContent = rows.length;
   localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
+  ui();
 }
 
 let tt;
@@ -102,12 +121,40 @@ function beep() {
   o.stop(audio.currentTime + 0.08);
 }
 
-function add(code) {
+// Procesa un código leído. Devuelve true cuando ya no hace falta seguir escaneando.
+// live = viene del video (sigue viendo el mismo código varios cuadros seguidos)
+function handle(code, live) {
+  const p = rows[pair];
+  if (!p) { // Paso 1: Serial Number
+    beep();
+    t0 = Date.now(); // da otros 30 s para leer el TAG
+    const i = rows.findIndex(r => r.serial === code || r.tag === code);
+    if (i < 0) {
+      rows.push({ serial: code, tag: '', estado: '' });
+      pair = rows.length - 1;
+      render();
+      toast('✓ Serial ' + code + ' — ahora el TAG');
+      return false;
+    }
+    if (rows[i].serial === code && !rows[i].tag) { // serial cargado sin TAG: retoma el emparejamiento
+      pair = i;
+      render();
+      toast('Serial ya cargado — escaneá su TAG');
+      return false;
+    }
+    toast('Ya escaneado: ' + code);
+    return true;
+  }
+  // Paso 2: TAG
+  if (code === p.serial) { if (!live) toast('Ese es el Serial: falta el TAG'); return false; }
+  const dup = rows.find(r => r.tag === code || r.serial === code);
+  if (dup) { toast('Código ya usado en ' + dup.serial); return false; }
   beep();
-  if (rows.some(r => r.code === code)) return toast('Ya escaneado: ' + code);
-  rows.push({ code, estado: '' });
+  p.tag = code;
+  pair = null;
   render();
-  toast('✓ ' + code);
+  toast('✓ TAG ' + code + ' emparejado');
+  return true;
 }
 
 async function getDetector() {
@@ -139,7 +186,7 @@ async function loop() {
   try {
     // Alterna recuadro / imagen completa: de cerca el código suele ser más grande que el recuadro
     const [hit] = video.videoWidth ? await detector.detect(++n % 2 ? crop() : video) : [];
-    if (hit) { stop(); return add(hit.rawValue); } // un código por escaneo
+    if (hit && handle(hit.rawValue, true)) return stop(); // Serial + TAG completos
   } catch {}
   timer = setTimeout(loop, 100);
 }
@@ -170,7 +217,7 @@ async function start() {
     await getDetector();
     await openCam();
     cam.hidden = false;
-    btnScan.textContent = '⏹ Cancelar';
+    ui();
     t0 = Date.now();
     loop();
   } catch (e) {
@@ -185,7 +232,7 @@ function stop() {
   clearTimeout(timer);
   video.srcObject = null;
   cam.hidden = true;
-  btnScan.textContent = '📷 Escanear';
+  ui();
 }
 
 // Recorre las cámaras traseras (en iPhone Pro, la ultra gran angular enfoca a 2 cm) y recuerda la elegida
@@ -207,15 +254,15 @@ async function fromPhoto(e) {
   if (!f) return;
   try {
     const [hit] = await (await getDetector()).detect(await createImageBitmap(f));
-    hit ? add(hit.rawValue) : toast('No se encontró un código en la foto');
+    hit ? handle(hit.rawValue, false) : toast('No se encontró un código en la foto');
   } catch (err) { toast('Error: ' + err.message); }
 }
 
 async function copy() {
   if (!rows.length) return toast('No hay datos');
-  const text = rows.map(r => `${r.code} - ${r.estado || 'Sin estado'}`).join('\n');
-  const html = '<table border="1"><tr><th>Número</th><th>Estado</th></tr>' +
-    rows.map(r => `<tr><td>${esc(r.code)}</td><td>${r.estado}</td></tr>`).join('') + '</table>';
+  const text = rows.map(r => `${r.estado || 'Sin estado'} - ${r.tag || 'Sin TAG'} - ${r.serial}`).join('\n');
+  const html = '<table border="1"><tr><th>Estado</th><th>TAG</th><th>Serial Number</th></tr>' +
+    rows.map(r => `<tr><td>${r.estado}</td><td>${esc(r.tag)}</td><td>${esc(r.serial)}</td></tr>`).join('') + '</table>';
   try {
     // Teams usa la versión HTML (tabla); WhatsApp usa el texto plano
     await navigator.clipboard.write([new ClipboardItem({
@@ -238,10 +285,10 @@ async function copy() {
 
 async function shareCSV() {
   if (!rows.length) return toast('No hay datos');
-  const q = s => `"${String(s).replace(/"/g, '""')}"`;
-  const lines = [['Número', 'Estado'], ...rows.map(r => [r.code, r.estado])];
-  // BOM + ";" para que Excel en español lo abra con acentos y columnas bien
-  const csv = '\ufeff' + lines.map(l => l.map(q).join(';')).join('\r\n');
+  // Comillas solo si el valor contiene coma, comillas o salto de línea
+  const q = s => /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const lines = [['Estado', 'TAG', 'Serial Number'], ...rows.map(r => [r.estado, r.tag, r.serial])];
+  const csv = lines.map(l => l.map(q).join(',')).join('\r\n');
   const name = `escaneos_${new Date().toISOString().slice(0, 10)}.csv`;
   const file = new File([csv], name, { type: 'text/csv' });
   if (navigator.canShare?.({ files: [file] })) {
@@ -257,19 +304,24 @@ async function shareCSV() {
   }
 }
 
-btnScan.onclick = () => stream ? stop() : start();
+// Cancelar deja la fila sin TAG (se puede completar luego con "🏷 Escanear TAG")
+btnScan.onclick = () => stream ? (pair = null, stop(), render()) : start();
 $('#flip').onclick = flip;
 $('#photo').onclick = () => { audio ??= new AudioContext(); stop(); $('#file').click(); };
 $('#file').onchange = fromPhoto;
 $('#copy').onclick = copy;
 $('#csv').onclick = shareCSV;
-$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los códigos?')) { rows = []; render(); } };
+$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los códigos?')) { rows = []; pair = null; render(); } };
 list.onclick = e => {
   const b = e.target.closest('button');
   if (!b) return;
   const i = +b.dataset.i, s = b.dataset.s;
   if (s) rows[i].estado = rows[i].estado === s ? '' : s; // tocar de nuevo lo desmarca
-  else rows.splice(i, 1);
+  else if ('t' in b.dataset) { pair = i; render(); if (!stream) start(); return; }
+  else {
+    rows.splice(i, 1);
+    if (pair === i) pair = null; else if (pair > i) pair--;
+  }
   render();
 };
 document.onvisibilitychange = () => document.hidden && stop();
