@@ -37,7 +37,7 @@
 <body>
 <main id="home">
   <h1>Escáner de códigos</h1>
-  <div id="cam" hidden><video playsinline muted autoplay></video>
+  <div id="cam" hidden>
     <div id="zoom" hidden><button data-z="1">1x</button><button data-z="2">2x</button><button data-z="3">3x</button></div>
     <div id="ok" hidden></div></div>
   <div class="bar"><button id="scan">📷 Escanear</button></div>
@@ -63,7 +63,8 @@ const POLYFILL = 'https://fastly.jsdelivr.net/npm/barcode-detector@2/dist/es/pur
 const KEY = 'codigos';
 const FORMATS = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'qr_code', 'data_matrix'];
 const $ = s => document.querySelector(s);
-const video = $('video'), btn = $('#scan'), list = $('#list'), msg = $('#msg'), home = $('#home'), panel = $('#panel');
+const btn = $('#scan'), list = $('#list'), msg = $('#msg'), home = $('#home'), panel = $('#panel');
+let video; // se crea uno nuevo en cada apertura: reusar el mismo en Safari deja el tamaño de la sesión anterior
 
 // Registros { tag, serial, date }; los guardados con la versión anterior pasan a Tag
 let rows = JSON.parse(localStorage.getItem(KEY) || '[]').map(r => r.code ? { tag: r.code, serial: '', date: r.date } : r);
@@ -117,6 +118,7 @@ function save(code) {
 async function loop(s) {
   while (stream === s) {
     try {
+      fit(); // por si Safari no avisa que la imagen cambió de forma
       if (video.readyState >= 2) {
         const [hit] = await detector.detect(video);
         if (hit && stream === s) {
@@ -152,6 +154,11 @@ async function start(t) {
       audio: false,
       video: { facingMode: 'environment', ...SIZE, advanced: [{ zoom }] }
     });
+    video = document.createElement('video');
+    video.muted = video.playsInline = video.autoplay = true;
+    video.setAttribute('playsinline', '');
+    video.addEventListener('resize', fit);
+    $('#cam').prepend(video);
     video.srcObject = stream;
     $('#cam').hidden = false;
     await video.play();
@@ -171,14 +178,15 @@ async function start(t) {
 // Ajusta el video para que siempre llene el cuadro, sin depender de object-fit (Safari no lo redibuja bien
 // cuando el iPhone gira los cuadros de horizontal a vertical al abrir la cámara). Se vuelve a calcular en cada cambio.
 function fit() {
-  const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam');
+  const vw = video?.videoWidth, vh = video?.videoHeight, c = $('#cam');
   if (!vw || !vh || c.hidden) return;
   const s = Math.max(c.clientWidth / vw, c.clientHeight / vh);
-  video.style.width = vw * s + 'px';
-  video.style.height = vh * s + 'px';
+  const w = vw * s + 'px', h = vh * s + 'px';
+  if (video.style.width === w && video.style.height === h) return;
+  video.style.width = w;
+  video.style.height = h;
   video.style.visibility = 'visible';
 }
-video.addEventListener('resize', fit);
 addEventListener('resize', fit);
 
 // Zoom real de la cámara (iOS 17+ / Chrome Android): amplía la imagen que se analiza.
@@ -205,10 +213,9 @@ async function setZoom(v) {
 }
 
 function stop() {
+  if (video) { video.srcObject = null; video.remove(); video = null; }
   stream?.getTracks().forEach(t => t.stop());
   stream = null;
-  video.srcObject = null;
-  video.style.visibility = 'hidden';
   $('#cam').hidden = true;
   $('#ok').hidden = true;
   btn.textContent = '📷 Escanear';
