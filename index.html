@@ -19,6 +19,7 @@
   #zoom button { flex: none; width: 44px; height: 36px; padding: 0; border-radius: 18px; background: none; color: #fff; font: 600 14px system-ui; }
   #zoom button.on { background: #fff3; color: #ffd60a; }
   .bar { display: flex; justify-content: center; gap: 10px; margin: 12px 0; }
+  .bar[hidden] { display: none; }
   button { flex: 1; max-width: 220px; padding: 22px; border: 0; border-radius: 14px; font: 600 19px system-ui; background: var(--accent); color: #fff; }
   button.sec { background: #8884; color: inherit; }
   #scan { max-width: 320px; padding: 28px; font-size: 23px; }
@@ -38,9 +39,11 @@
   li b { color: #888; font: 600 13px system-ui; }
   button.danger { background: #ff453a; }
   button:disabled { opacity: .4; }
-  #allrow { display: flex; align-items: center; gap: 12px; padding: 10px 0 10px 2.5em; border-bottom: 1px solid #8883; font-weight: 600; }
+  #allrow { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #8883; font-weight: 600; }
   #allrow[hidden] { display: none; }
-  li label { display: flex; align-items: center; gap: 12px; }
+  /* En modo selección el círculo reemplaza al número, así no se superponen */
+  ol.sel { list-style: none; padding-left: 0; }
+  li label { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
   /* Selector redondo */
   input[type=checkbox] { -webkit-appearance: none; appearance: none; flex: none; width: 26px; height: 26px; margin: 0; border: 2px solid #8889; border-radius: 50%; }
   input[type=checkbox]:checked { border-color: var(--accent); background: radial-gradient(var(--accent) 0 45%, transparent 50%); }
@@ -101,6 +104,7 @@ function render() {
       ? `<li><label><input type="checkbox" data-i="${i}"${sel.has(i) ? ' checked' : ''}>${txt}</label></li>`
       : `<li${r.ubicacion ? '' : ' class="miss"'}>${txt}<select data-u="${i}">${opts(r.ubicacion)}</select></li>`;
   }).reverse().join('');
+  list.classList.toggle('sel', !!sel);
   $('#acts').hidden = !!sel;
   $('#selbar').hidden = $('#allrow').hidden = !sel;
   if (sel) {
