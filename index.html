@@ -9,12 +9,22 @@
   * { box-sizing: border-box; }
   body { margin: 0 auto; max-width: 600px; padding: 12px; font: 16px -apple-system, system-ui, sans-serif; }
   h1 { font-size: 20px; margin: 4px 0 12px; }
-  #cam { position: relative; height: 60vh; background: #000; border-radius: 12px; overflow: hidden; touch-action: none; }
-  #cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
-  #guide { position: absolute; inset: 32% 4%; border: 3px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px #0006; }
-  #hint { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; color: #fff; font-size: 13px; text-shadow: 0 1px 2px #000; }
-  #flip { position: absolute; top: 8px; right: 8px; padding: 8px 12px; background: #0009; }
-  #zoom { position: absolute; top: 8px; left: 8px; padding: 6px 10px; border-radius: 10px; background: #0009; color: #fff; font: 600 14px system-ui; }
+  #cam { position: relative; height: 60vh; background: #000; border-radius: 16px; overflow: hidden; touch-action: none; }
+  #cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* Recuadro de lectura: esquinas blancas + línea roja que barre, fuera del recuadro se oscurece */
+  #guide { position: absolute; inset: 33% 7%; border-radius: 4px; box-shadow: 0 0 0 999px #0009;
+    --c: linear-gradient(#fff 0 0); --l: 28px; --t: 4px;
+    background: var(--c) top left / var(--l) var(--t), var(--c) top left / var(--t) var(--l),
+      var(--c) top right / var(--l) var(--t), var(--c) top right / var(--t) var(--l),
+      var(--c) bottom left / var(--l) var(--t), var(--c) bottom left / var(--t) var(--l),
+      var(--c) bottom right / var(--l) var(--t), var(--c) bottom right / var(--t) var(--l);
+    background-repeat: no-repeat; }
+  #guide::after { content: ''; position: absolute; left: 6%; right: 6%; height: 2px; background: var(--danger); box-shadow: 0 0 10px var(--danger); animation: sweep 1.6s ease-in-out infinite alternate; }
+  @keyframes sweep { from { top: 12%; } to { top: 88%; } }
+  .chip { position: absolute; top: 12px; flex: none; display: flex; align-items: center; justify-content: center; height: 36px; min-width: 36px; padding: 0 12px; border-radius: 18px; background: #0007; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: #fff; font: 600 14px system-ui; }
+  #zoom { left: 12px; }
+  #flip { right: 12px; padding: 0; }
+  #hint { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); width: max-content; max-width: 90%; padding: 6px 12px; border-radius: 14px; background: #0007; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: #fff; font-size: 13px; text-align: center; }
   .bar { display: flex; gap: 8px; margin: 10px 0; }
   button { flex: 1; padding: 14px; border: 0; border-radius: 10px; font: 600 15px system-ui; background: var(--accent); color: #fff; }
   button.sec { background: #8884; color: inherit; }
@@ -40,9 +50,9 @@
 <div id="cam" hidden>
   <video playsinline muted></video>
   <div id="guide"></div>
-  <button id="flip" aria-label="Cambiar cámara">🔄</button>
-  <div id="zoom">1.0x</div>
-  <div id="hint">Pellizcá con dos dedos para hacer zoom · Si se ve borroso: 🔄 otra cámara o 📸 Foto</div>
+  <button id="flip" class="chip" aria-label="Cambiar cámara"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg></button>
+  <div id="zoom" class="chip">1.0x</div>
+  <div id="hint">Pellizcá para zoom · ¿Borroso? Cambiá de cámara o usá Foto</div>
 </div>
 
 <div class="bar">
@@ -151,44 +161,30 @@ async function loop() {
 async function openCam() {
   stream?.getTracks().forEach(t => t.stop()); // iOS permite una sola cámara a la vez
   const id = localStorage.getItem(CAM);
+  // Enfoque continuo pedido al abrir: cambiar la cámara ya abierta (applyConstraints) en iPhone
+  // deja la imagen chica y descentrada dentro de la ventana
+  const opts = { ...SIZE, advanced: [{ focusMode: 'continuous' }] };
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: id ? { deviceId: { exact: id }, ...SIZE } : { facingMode: 'environment', ...SIZE }
+      video: id ? { deviceId: { exact: id }, ...opts } : { facingMode: 'environment', ...opts }
     });
   } catch (e) {
     if (!id) throw e;
     localStorage.removeItem(CAM); // la cámara guardada ya no existe: vuelve a la principal
     return openCam();
   }
-  const track = stream.getVideoTracks()[0];
-  adv = track.getCapabilities?.().focusMode?.includes('continuous') ? { focusMode: 'continuous' } : {};
-  if (adv.focusMode) applyCam(track);
   video.srcObject = stream;
-  zoom = 1; // la cámara nueva arranca sin zoom
-  video.style.transform = '';
-  $('#zoom').textContent = '1.0x';
+  setZoom(1); // la cámara nueva arranca sin zoom
   await video.play();
 }
 
-// applyConstraints reemplaza TODAS las restricciones: se repiten resolución y enfoque,
-// si no la cámara vuelve a baja resolución (640x480) y deja de leer códigos
-let adv = {};
-const applyCam = track => track.applyConstraints({ ...SIZE, advanced: [adv] }).catch(() => {});
-
-// Zoom con dos dedos: usa el zoom de la cámara si el celular lo permite; si no, amplía la imagen
+// Zoom con dos dedos: amplía la imagen en pantalla (no toca la cámara, así no pierde resolución
+// ni se deforma). El recorte se sigue tomando del video a resolución completa.
 let zoom = 1, z0, d0;
 function setZoom(z) {
-  const track = stream?.getVideoTracks()[0], caps = track?.getCapabilities?.().zoom;
-  if (caps) {
-    zoom = Math.min(Math.max(z, caps.min), caps.max);
-    adv = { ...adv, zoom };
-    applyCam(track);
-    video.style.transform = '';
-  } else {
-    zoom = Math.min(Math.max(z, 1), 5);
-    video.style.transform = zoom > 1 ? `scale(${zoom})` : '';
-  }
+  zoom = Math.min(Math.max(z, 1), 5);
+  video.style.transform = zoom > 1 ? `scale(${zoom})` : '';
   $('#zoom').textContent = zoom.toFixed(1) + 'x';
 }
 const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
