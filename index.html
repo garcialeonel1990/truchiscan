@@ -9,24 +9,20 @@
   * { box-sizing: border-box; }
   body { margin: 0 auto; max-width: 600px; padding: 12px; font: 16px -apple-system, system-ui, sans-serif; }
   h1 { font-size: 20px; margin: 4px 0 12px; }
-  #cam { position: relative; aspect-ratio: 4/3; background: #000; border-radius: 12px; overflow: hidden; }
+  #cam { position: relative; height: 60vh; background: #000; border-radius: 12px; overflow: hidden; touch-action: none; }
   #cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
-  #guide { position: absolute; inset: 32% 6%; border: 3px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px #0006; }
-  #cam.tag #guide { border-color: var(--warn); }
+  #guide { position: absolute; inset: 22% 4%; border: 3px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px #0006; }
   #hint { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; color: #fff; font-size: 13px; text-shadow: 0 1px 2px #000; }
-  #step { font-size: 15px; }
   #flip { position: absolute; top: 8px; right: 8px; padding: 8px 12px; background: #0009; }
+  #zoom { position: absolute; top: 8px; left: 8px; padding: 6px 10px; border-radius: 10px; background: #0009; color: #fff; font: 600 14px system-ui; }
   .bar { display: flex; gap: 8px; margin: 10px 0; }
   button { flex: 1; padding: 14px; border: 0; border-radius: 10px; font: 600 15px system-ui; background: var(--accent); color: #fff; }
   button.sec { background: #8884; color: inherit; }
   .row { padding: 10px 0 10px 10px; border-bottom: 1px solid #8883; border-left: 4px solid transparent; }
   .row.pend { border-left-color: var(--warn); }
-  .row.now { border-left-color: var(--accent); background: #0a84ff14; }
   .top { display: flex; align-items: center; gap: 8px; font-family: ui-monospace, monospace; word-break: break-all; }
   .top b { color: #888; font-weight: 400; }
-  .top span { flex: 1; line-height: 1.6; }
-  .top small { display: inline-block; width: 34px; color: #888; font-size: 11px; }
-  .top .tag { padding: 4px 10px; font-size: 13px; background: var(--warn); }
+  .top span { flex: 1; }
   .del { flex: 0; padding: 4px 8px; background: none; color: var(--danger); font-size: 18px; }
   .st { display: flex; gap: 6px; margin-top: 8px; }
   .st button { padding: 10px 4px; font-size: 14px; background: #8882; color: inherit; }
@@ -45,12 +41,12 @@
   <video playsinline muted></video>
   <div id="guide"></div>
   <button id="flip" aria-label="Cambiar cámara">🔄</button>
-  <div id="hint"><b id="step"></b><br>Si se ve borroso: probá 🔄 otra cámara o usá 📸 Foto</div>
+  <div id="zoom">1.0x</div>
+  <div id="hint">Pellizcá con dos dedos para hacer zoom · Si se ve borroso: 🔄 otra cámara o 📸 Foto</div>
 </div>
 
 <div class="bar">
   <button id="scan">📷 Escanear</button>
-  <button id="mouse" class="sec">🖱 Mouse</button>
   <button id="photo" class="sec">📸 Foto</button>
   <input id="file" type="file" accept="image/*" capture="environment" hidden>
 </div>
@@ -66,48 +62,28 @@
 
 <script type="module">
 const POLYFILL = 'https://fastly.jsdelivr.net/npm/barcode-detector@2/dist/es/pure.min.js';
-const TESS = 'https://fastly.jsdelivr.net/npm/tesseract.js@7/dist/tesseract.esm.min.js';
 const KEY = 'scans', CAM = 'camId';
 const ESTADOS = ['En stock', 'Asignada', 'Reparar'];
 const FORMATS = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'qr_code', 'data_matrix'];
 const TIMEOUT = 30000; // apaga la cámara si no lee nada en 30 s
-// Serial impreso: 10–18 letras/números con al menos 4 dígitos y 2 letras (descarta modelo, FCC ID y ANATEL)
-const SERIAL = w => /^[A-Z0-9]{10,18}$/.test(w) && /(\D*\d){4}/.test(w) && /([^A-Z]*[A-Z]){2}/.test(w);
 const $ = s => document.querySelector(s);
-const video = $('video'), cam = $('#cam'), guide = $('#guide'), list = $('#list'), btnScan = $('#scan'), btnMouse = $('#mouse');
+const video = $('video'), cam = $('#cam'), guide = $('#guide'), list = $('#list'), btnScan = $('#scan');
 const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-// Migra datos guardados con la versión anterior ({ code, estado })
-let rows = JSON.parse(localStorage.getItem(KEY) || '[]')
-  .map(r => ({ serial: r.serial ?? r.code, tag: r.tag ?? '', estado: r.estado ?? '' }));
-let pair = null; // índice de la fila que espera su TAG
-let mode = 'code'; // 'ocr' = serial del mouse leído como texto
-let stream, detector, ocr, last, timer, audio, t0, n = 0;
+let rows = JSON.parse(localStorage.getItem(KEY) || '[]');
+let stream, detector, timer, audio, t0, n = 0;
 
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-// Paso actual: 1) Serial Number → 2) TAG del mismo equipo
-function ui() {
-  const p = rows[pair];
-  $('#step').textContent = p ? `Paso 2/2: TAG de ${p.serial}`
-    : mode === 'ocr' ? 'Paso 1/2: Serial del mouse — alineá el texto en el recuadro' : 'Paso 1/2: Serial Number';
-  cam.classList.toggle('tag', !!p);
-  btnScan.textContent = stream ? '⏹ Cancelar' : p ? '🏷 Escanear TAG' : '📷 Escanear';
-  btnMouse.hidden = !!stream;
-}
 
 function render() {
   // Lo último escaneado arriba; los datos quedan en orden de escaneo
   list.innerHTML = rows.map((r, i) =>
-    `<div class="row${i === pair ? ' now' : r.tag && r.estado ? '' : ' pend'}">
-      <div class="top"><b>${i + 1}</b>
-        <span><small>SN</small>${esc(r.serial)}<br><small>TAG</small>${r.tag ? esc(r.tag) : `<button class="tag" data-i="${i}" data-t>🏷 Escanear TAG</button>`}</span>
-        <button class="del" data-i="${i}" aria-label="Borrar">✕</button></div>
+    `<div class="row${r.estado ? '' : ' pend'}">
+      <div class="top"><b>${i + 1}</b><span>${esc(r.code)}</span><button class="del" data-i="${i}" aria-label="Borrar">✕</button></div>
       <div class="st">${ESTADOS.map(s => `<button data-i="${i}" data-s="${s}" class="${r.estado === s ? 'on' : ''}">${s}</button>`).join('')}</div>
     </div>`).reverse().join('');
   $('#count').textContent = rows.length;
   localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
-  ui();
 }
 
 let tt;
@@ -128,40 +104,12 @@ function beep() {
   o.stop(audio.currentTime + 0.08);
 }
 
-// Procesa un código leído. Devuelve true cuando ya no hace falta seguir escaneando.
-// live = viene del video (sigue viendo el mismo código varios cuadros seguidos)
-function handle(code, live) {
-  const p = rows[pair];
-  if (!p) { // Paso 1: Serial Number
-    beep();
-    t0 = Date.now(); // da otros 30 s para leer el TAG
-    const i = rows.findIndex(r => r.serial === code || r.tag === code);
-    if (i < 0) {
-      rows.push({ serial: code, tag: '', estado: '' });
-      pair = rows.length - 1;
-      render();
-      toast('✓ Serial ' + code + ' — ahora el TAG');
-      return false;
-    }
-    if (rows[i].serial === code && !rows[i].tag) { // serial cargado sin TAG: retoma el emparejamiento
-      pair = i;
-      render();
-      toast('Serial ya cargado — escaneá su TAG');
-      return false;
-    }
-    toast('Ya escaneado: ' + code);
-    return true;
-  }
-  // Paso 2: TAG
-  if (code === p.serial) { if (!live) toast('Ese es el Serial: falta el TAG'); return false; }
-  const dup = rows.find(r => r.tag === code || r.serial === code);
-  if (dup) { toast('Código ya usado en ' + dup.serial); return false; }
+function add(code) {
   beep();
-  p.tag = code;
-  pair = null;
+  if (rows.some(r => r.code === code)) return toast('Ya escaneado: ' + code);
+  rows.push({ code, estado: '' });
   render();
-  toast('✓ TAG ' + code + ' emparejado');
-  return true;
+  toast('✓ ' + code);
 }
 
 async function getDetector() {
@@ -174,29 +122,11 @@ async function getDetector() {
   return detector;
 }
 
-// Lector de texto (OCR) para seriales grabados sin código de barras; se descarga la primera vez
-async function getOcr() {
-  if (!ocr) {
-    toast('Cargando lector de texto…');
-    ocr = await (await import(TESS)).default.createWorker('eng');
-    // Sin I ni O: Apple no las usa en seriales (evita confundirlas con 1 y 0)
-    await ocr.setParameters({ tessedit_char_whitelist: 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789 ', tessedit_pageseg_mode: '6' });
-  }
-  return ocr;
-}
-
-// Lee el texto del recuadro; solo acepta el serial si sale igual en 2 lecturas seguidas
-async function readSerial() {
-  const { data } = await ocr.recognize(crop());
-  const s = data.text.split(/\s+/).filter(SERIAL).sort((a, b) => b.length - a.length)[0];
-  if (s && s === last) return s;
-  last = s;
-}
-
 // Recorta del video solo lo que está dentro del recuadro, a resolución completa (códigos lejanos/chicos)
+// Usa el tamaño del video en pantalla, así también funciona con el zoom digital
 function crop() {
   const vw = video.videoWidth, vh = video.videoHeight;
-  const c = cam.getBoundingClientRect(), g = guide.getBoundingClientRect();
+  const c = video.getBoundingClientRect(), g = guide.getBoundingClientRect();
   const s = Math.max(c.width / vw, c.height / vh); // escala de object-fit: cover
   const ox = (vw * s - c.width) / 2, oy = (vh * s - c.height) / 2;
   const w = g.width / s, h = g.height / s;
@@ -210,14 +140,9 @@ async function loop() {
   if (!stream) return;
   if (Date.now() - t0 > TIMEOUT) { stop(); return toast('Cámara apagada por inactividad'); }
   try {
-    if (mode === 'ocr' && !rows[pair]) { // Paso 1 del mouse: serial como texto
-      const s = video.videoWidth && await readSerial();
-      if (s && handle(s, true)) return stop();
-    } else {
-      // Alterna recuadro / imagen completa: de cerca el código suele ser más grande que el recuadro
-      const [hit] = video.videoWidth ? await detector.detect(++n % 2 ? crop() : video) : [];
-      if (hit && handle(hit.rawValue, true)) return stop(); // Serial + TAG completos
-    }
+    // Alterna recuadro / imagen completa: de cerca el código suele ser más grande que el recuadro
+    const [hit] = video.videoWidth ? await detector.detect(++n % 2 ? crop() : video) : [];
+    if (hit) { stop(); return add(hit.rawValue); } // un código por escaneo
   } catch {}
   timer = setTimeout(loop, 100);
 }
@@ -239,19 +164,42 @@ async function openCam() {
   if (track.getCapabilities?.().focusMode?.includes('continuous'))
     track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
   video.srcObject = stream;
+  setZoom(1);
   await video.play();
 }
 
-async function start(m = 'code') {
+// Zoom con dos dedos: usa el zoom de la cámara si el celular lo permite; si no, amplía la imagen
+let zoom = 1, z0, d0;
+function setZoom(z) {
+  const track = stream?.getVideoTracks()[0], caps = track?.getCapabilities?.().zoom;
+  if (caps) {
+    zoom = Math.min(Math.max(z, caps.min), caps.max);
+    track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
+    video.style.transform = '';
+  } else {
+    zoom = Math.min(Math.max(z, 1), 5);
+    video.style.transform = zoom > 1 ? `scale(${zoom})` : '';
+  }
+  $('#zoom').textContent = zoom.toFixed(1) + 'x';
+}
+const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+cam.addEventListener('touchstart', e => { if (e.touches.length === 2) { d0 = dist(e.touches); z0 = zoom; } }, { passive: true });
+cam.addEventListener('touchmove', e => {
+  if (e.touches.length !== 2 || !d0) return;
+  e.preventDefault(); // evita que se agrande la página entera
+  setZoom(z0 * dist(e.touches) / d0);
+  t0 = Date.now(); // mientras ajusta el zoom no se apaga por inactividad
+}, { passive: false });
+cam.addEventListener('touchend', e => { if (e.touches.length < 2) d0 = null; });
+cam.addEventListener('gesturestart', e => e.preventDefault()); // Safari/iOS
+
+async function start() {
   try {
-    mode = m;
-    last = null;
     audio ??= new AudioContext(); // se crea tras un toque (requisito de iOS)
     await getDetector();
-    if (m === 'ocr') await getOcr();
     await openCam();
     cam.hidden = false;
-    ui();
+    btnScan.textContent = '⏹ Cancelar';
     t0 = Date.now();
     loop();
   } catch (e) {
@@ -263,11 +211,10 @@ async function start(m = 'code') {
 function stop() {
   stream?.getTracks().forEach(t => t.stop());
   stream = null;
-  mode = 'code';
   clearTimeout(timer);
   video.srcObject = null;
   cam.hidden = true;
-  ui();
+  btnScan.textContent = '📷 Escanear';
 }
 
 // Recorre las cámaras traseras (en iPhone Pro, la ultra gran angular enfoca a 2 cm) y recuerda la elegida
@@ -289,15 +236,15 @@ async function fromPhoto(e) {
   if (!f) return;
   try {
     const [hit] = await (await getDetector()).detect(await createImageBitmap(f));
-    hit ? handle(hit.rawValue, false) : toast('No se encontró un código en la foto');
+    hit ? add(hit.rawValue) : toast('No se encontró un código en la foto');
   } catch (err) { toast('Error: ' + err.message); }
 }
 
 async function copy() {
   if (!rows.length) return toast('No hay datos');
-  const text = rows.map(r => `${r.estado || 'Sin estado'} - ${r.tag || 'Sin TAG'} - ${r.serial}`).join('\n');
-  const html = '<table border="1"><tr><th>Estado</th><th>TAG</th><th>Serial Number</th></tr>' +
-    rows.map(r => `<tr><td>${r.estado}</td><td>${esc(r.tag)}</td><td>${esc(r.serial)}</td></tr>`).join('') + '</table>';
+  const text = rows.map(r => `${r.code} - ${r.estado || 'Sin estado'}`).join('\n');
+  const html = '<table border="1"><tr><th>Número</th><th>Estado</th></tr>' +
+    rows.map(r => `<tr><td>${esc(r.code)}</td><td>${r.estado}</td></tr>`).join('') + '</table>';
   try {
     // Teams usa la versión HTML (tabla); WhatsApp usa el texto plano
     await navigator.clipboard.write([new ClipboardItem({
@@ -320,10 +267,10 @@ async function copy() {
 
 async function shareCSV() {
   if (!rows.length) return toast('No hay datos');
-  // Comillas solo si el valor contiene coma, comillas o salto de línea
-  const q = s => /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  const lines = [['Estado', 'TAG', 'Serial Number'], ...rows.map(r => [r.estado, r.tag, r.serial])];
-  const csv = lines.map(l => l.map(q).join(',')).join('\r\n');
+  const q = s => `"${String(s).replace(/"/g, '""')}"`;
+  const lines = [['Número', 'Estado'], ...rows.map(r => [r.code, r.estado])];
+  // BOM + ";" para que Excel en español lo abra con acentos y columnas bien
+  const csv = '\ufeff' + lines.map(l => l.map(q).join(';')).join('\r\n');
   const name = `escaneos_${new Date().toISOString().slice(0, 10)}.csv`;
   const file = new File([csv], name, { type: 'text/csv' });
   if (navigator.canShare?.({ files: [file] })) {
@@ -339,25 +286,19 @@ async function shareCSV() {
   }
 }
 
-// Cancelar deja la fila sin TAG (se puede completar luego con "🏷 Escanear TAG")
-btnScan.onclick = () => stream ? (pair = null, stop(), render()) : start();
-btnMouse.onclick = () => { pair = null; start('ocr'); };
+btnScan.onclick = () => stream ? stop() : start();
 $('#flip').onclick = flip;
 $('#photo').onclick = () => { audio ??= new AudioContext(); stop(); $('#file').click(); };
 $('#file').onchange = fromPhoto;
 $('#copy').onclick = copy;
 $('#csv').onclick = shareCSV;
-$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los códigos?')) { rows = []; pair = null; render(); } };
+$('#clear').onclick = () => { if (rows.length && confirm('¿Borrar todos los códigos?')) { rows = []; render(); } };
 list.onclick = e => {
   const b = e.target.closest('button');
   if (!b) return;
   const i = +b.dataset.i, s = b.dataset.s;
   if (s) rows[i].estado = rows[i].estado === s ? '' : s; // tocar de nuevo lo desmarca
-  else if ('t' in b.dataset) { pair = i; render(); if (!stream) start(); return; }
-  else {
-    rows.splice(i, 1);
-    if (pair === i) pair = null; else if (pair > i) pair--;
-  }
+  else rows.splice(i, 1);
   render();
 };
 document.onvisibilitychange = () => document.hidden && stop();
