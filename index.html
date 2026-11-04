@@ -40,7 +40,11 @@
   button.danger { background: #ff453a; }
   button:disabled { opacity: .4; }
   #allrow { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #8883; font-weight: 600; }
-  #allrow[hidden] { display: none; }
+  #selbox[hidden] { display: none; }
+  /* Asignar en lote: misma ubicación y/o modelo a los seleccionados */
+  #bulk { margin: 12px 0; padding: 6px 14px 14px; border-radius: 14px; background: #8882; }
+  #bModelo { flex: 1; min-width: 0; padding: 10px; border: 1px solid #8886; border-radius: 10px; background: #8881; color: inherit; font: 600 17px system-ui; }
+  #apply { display: block; width: 100%; max-width: none; margin-top: 8px; padding: 16px; }
   /* En modo selección el círculo reemplaza al número, así no se superponen */
   ol.sel { list-style: none; padding-left: 0; }
   li label { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
@@ -69,13 +73,21 @@
   <div class="bar"><button id="back" class="sec">← Volver</button></div>
   <div class="bar" id="acts">
     <button id="csv">📤 Exportar CSV</button>
-    <button id="clear" class="sec">🗑 Borrar</button>
+    <button id="pick" class="sec">☑ Seleccionar</button>
   </div>
-  <div class="bar" id="selbar" hidden>
-    <button id="del" class="danger">🗑 Borrar (<span id="n">0</span>)</button>
-    <button id="cancel" class="sec">Cancelar</button>
+  <div id="selbox" hidden>
+    <div id="bulk">
+      <div class="f"><b>Ubicación</b><select id="bUbic"></select></div>
+      <div class="f"><b>Modelo</b><input id="bModelo" list="modelos" placeholder="No cambiar" autocomplete="off"></div>
+      <datalist id="modelos"></datalist>
+      <button id="apply">✓ Asignar a <span id="n2">0</span></button>
+    </div>
+    <div class="bar">
+      <button id="del" class="danger">🗑 Borrar (<span id="n">0</span>)</button>
+      <button id="cancel" class="sec">Cancelar</button>
+    </div>
+    <label id="allrow"><input type="checkbox" id="all"> Seleccionar todos</label>
   </div>
-  <label id="allrow" hidden><input type="checkbox" id="all"> Seleccionar todos</label>
   <ol id="list" reversed></ol>
 </section>
 
@@ -99,18 +111,20 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 
 function render() {
   list.innerHTML = rows.map((r, i) => {
-    const txt = `<span><b>Tag</b> ${esc(r.tag || '—')}<br><b>Serial</b> ${esc(r.serial || '—')}</span>`;
+    const txt = `<span><b>Tag</b> ${esc(r.tag || '—')}<br><b>Serial</b> ${esc(r.serial || '—')}` +
+      (r.modelo ? `<br><b>Modelo</b> ${esc(r.modelo)}` : '') + '</span>';
     return sel
       ? `<li><label><input type="checkbox" data-i="${i}"${sel.has(i) ? ' checked' : ''}>${txt}</label></li>`
       : `<li${r.ubicacion ? '' : ' class="miss"'}>${txt}<select data-u="${i}">${opts(r.ubicacion)}</select></li>`;
   }).reverse().join('');
   list.classList.toggle('sel', !!sel);
   $('#acts').hidden = !!sel;
-  $('#selbar').hidden = $('#allrow').hidden = !sel;
+  $('#selbox').hidden = !sel;
   if (sel) {
-    $('#n').textContent = sel.size;
+    $('#n').textContent = $('#n2').textContent = sel.size;
     $('#del').disabled = !sel.size;
     $('#all').checked = sel.size === rows.length;
+    canApply();
   }
   $('#count').textContent = rows.length;
   const r = rows[cur];
@@ -259,7 +273,7 @@ function stop() {
 }
 
 // Mismas columnas y en el mismo orden que "Inventario IT - Planilla para importar.xlsx".
-// Por ahora se completan Tag y N° de serie; Ubicación queda vacía hasta que la app la pida.
+// Por ahora se completan Tag, Modelo, N° de serie y Ubicación.
 const COLS = ['Tag', 'Usuario', 'Email', 'Posición', 'Área', 'Contratación', 'Tipo', 'Marca', 'Modelo', 'Año',
   'N° de serie', 'Estado', 'Condición', 'Ubicación', 'Fecha de compra', 'Costo', 'Moneda', 'Proveedor', 'Factura',
   'Link factura', 'Garantía hasta', 'Notas', 'RAM', 'Disco', 'N° de solicitud de gasto', 'N° de orden de compra'];
@@ -272,7 +286,7 @@ async function exportCSV() {
     return list.querySelector('.miss')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
   const q = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
-  const data = rows.map(r => ({ 'Tag': r.tag, 'N° de serie': r.serial, 'Ubicación': r.ubicacion }));
+  const data = rows.map(r => ({ 'Tag': r.tag, 'Modelo': r.modelo, 'N° de serie': r.serial, 'Ubicación': r.ubicacion }));
   const lines = [COLS, ...data.map(d => COLS.map(c => d[c]))];
   // BOM + ";" para que Excel en español lo abra con acentos y columnas bien
   const csv = '\ufeff' + lines.map(l => l.map(q).join(';')).join('\r\n');
@@ -301,8 +315,26 @@ list.addEventListener('change', e => {
   const i = e.target.dataset.u;
   if (i != null) { rows[+i].ubicacion = e.target.value; render(); }
 });
-// Borrar: entra en modo selección (uno, varios o todos)
-$('#clear').onclick = () => { if (!rows.length) return alert('No hay registros'); sel = new Set(); render(); };
+// Seleccionar: marca uno, varios o todos para asignarles ubicación/modelo o borrarlos
+$('#pick').onclick = () => {
+  if (!rows.length) return alert('No hay registros');
+  sel = new Set();
+  $('#bUbic').innerHTML = '<option value="">No cambiar</option>' + UBIC.map(u => `<option>${u}</option>`).join('');
+  $('#bModelo').value = '';
+  // Sugiere los modelos ya cargados para escribirlos igual en todos
+  $('#modelos').innerHTML = [...new Set(rows.map(r => r.modelo).filter(Boolean))].map(m => `<option value="${esc(m)}">`).join('');
+  render();
+};
+function canApply() {
+  $('#apply').disabled = !sel?.size || !($('#bUbic').value || $('#bModelo').value.trim());
+}
+$('#bUbic').onchange = $('#bModelo').oninput = canApply;
+$('#apply').onclick = () => {
+  const u = $('#bUbic').value, m = $('#bModelo').value.trim();
+  sel.forEach(i => { if (u) rows[i].ubicacion = u; if (m) rows[i].modelo = m; });
+  sel = null;
+  render();
+};
 $('#cancel').onclick = () => { sel = null; render(); };
 $('#all').onchange = e => { sel = new Set(e.target.checked ? rows.keys() : []); render(); };
 list.onchange = e => {
