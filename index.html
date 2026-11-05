@@ -30,9 +30,12 @@
   .f b { width: 76px; color: #888; font: 600 14px system-ui; }
   .f span { flex: 1; font: 600 20px ui-monospace, monospace; word-break: break-all; }
   select { flex: 1; min-width: 0; padding: 10px; border: 1px solid #8886; border-radius: 10px; background: #8881; color: inherit; font: 600 17px system-ui; }
-  li select { width: 100%; margin-top: 8px; }
+  /* Ubicación a lo ancho; Estado y Tipo lado a lado */
+  .sels { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+  .sels select { width: 100%; }
+  .sels select:first-child { grid-column: 1 / -1; }
   li.miss { border-left: 4px solid #ff9f0a; padding-left: 8px; }
-  li.miss select { border-color: #ff9f0a; }
+  li.miss select[data-f=ubicacion] { border-color: #ff9f0a; }
   button.mini { flex: none; padding: 10px 14px; font-size: 18px; border-radius: 10px; }
   ol { padding-left: 2.5em; word-break: break-all; }
   li { padding: 8px 0; border-bottom: 1px solid #8883; font-family: ui-monospace, monospace; }
@@ -77,7 +80,9 @@
   </div>
   <div id="selbox" hidden>
     <div id="bulk">
-      <div class="f"><b>Ubicación</b><select id="bUbic"></select></div>
+      <div class="f"><b>Ubicación</b><select data-b="ubicacion"></select></div>
+      <div class="f"><b>Estado</b><select data-b="estado"></select></div>
+      <div class="f"><b>Tipo</b><select data-b="tipo"></select></div>
       <div class="f"><b>Modelo</b><input id="bModelo" list="modelos" placeholder="No cambiar" autocomplete="off"></div>
       <datalist id="modelos"></datalist>
       <button id="apply">✓ Asignar a <span id="n2">0</span></button>
@@ -103,9 +108,22 @@ let video; // se crea uno nuevo en cada apertura: reusar el mismo en Safari deja
 let rows = JSON.parse(localStorage.getItem(KEY) || '[]').map(r => r.code ? { tag: r.code, serial: '', date: r.date } : r);
 let cur = rows.length - 1; // registro que se muestra y completa
 let stream, detector, audio, target;
-let sel = null; // registros marcados para borrar (índices); null = modo normal
-const UBIC = ['Depósito 1ro', 'Depósito 5to', 'Reparar', 'Asignada'];
-const opts = v => '<option value="">Elegí ubicación…</option>' + UBIC.map(u => `<option${u === v ? ' selected' : ''}>${u}</option>`).join('');
+let sel = null; // registros marcados para asignar o borrar (índices); null = modo normal
+// Opciones de cada campo de la lista
+const FIELDS = {
+  ubicacion: { label: 'ubicación', opts: ['Sin ubicación', 'Piso 8', 'Piso 5 Depósito', 'Piso 5', 'Piso 4', 'Piso 1 Depósito', 'Piso 1', 'PB', 'Oficina IT', 'Chile'] },
+  estado: { label: 'estado', opts: ['Rotos', 'En reparación', 'Libres', 'Asignados'] },
+  tipo: { label: 'tipo', opts: ['Otro', 'Equipo de red', 'Impresora', 'Dock / Adaptador', 'Cargador', 'Auriculares', 'Mouse', 'Teclado', 'Tablet', 'iPad', 'Celular Android', 'iPhone', 'Monitor', 'PC de escritorio', 'Notebook'] },
+};
+const opts = (f, v, first = `Elegí ${FIELDS[f].label}…`) =>
+  `<option value="">${first}</option>` + FIELDS[f].opts.map(o => `<option${o === v ? ' selected' : ''}>${o}</option>`).join('');
+// Ubicaciones de la versión anterior: los depósitos pasan a la ubicación nueva; Reparar y Asignada pasan a Estado
+const OLD = { 'Depósito 1ro': ['ubicacion', 'Piso 1 Depósito'], 'Depósito 5to': ['ubicacion', 'Piso 5 Depósito'],
+  'Reparar': ['estado', 'En reparación'], 'Asignada': ['estado', 'Asignados'] };
+for (const r of rows) {
+  const o = OLD[r.ubicacion];
+  if (o) { r.ubicacion = ''; r[o[0]] ||= o[1]; }
+}
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -115,7 +133,8 @@ function render() {
       (r.modelo ? `<br><b>Modelo</b> ${esc(r.modelo)}` : '') + '</span>';
     return sel
       ? `<li><label><input type="checkbox" data-i="${i}"${sel.has(i) ? ' checked' : ''}>${txt}</label></li>`
-      : `<li${r.ubicacion ? '' : ' class="miss"'}>${txt}<select data-u="${i}">${opts(r.ubicacion)}</select></li>`;
+      : `<li${r.ubicacion ? '' : ' class="miss"'}>${txt}<div class="sels">` +
+        Object.keys(FIELDS).map(f => `<select data-f="${f}" data-r="${i}">${opts(f, r[f])}</select>`).join('') + '</div></li>';
   }).reverse().join('');
   list.classList.toggle('sel', !!sel);
   $('#acts').hidden = !!sel;
@@ -129,7 +148,7 @@ function render() {
   $('#count').textContent = rows.length;
   const r = rows[cur];
   $('#card').hidden = !r;
-  if (r) { $('#tag').textContent = r.tag || '—'; $('#serial').textContent = r.serial || '—'; $('#ubic').innerHTML = opts(r.ubicacion); }
+  if (r) { $('#tag').textContent = r.tag || '—'; $('#serial').textContent = r.serial || '—'; $('#ubic').innerHTML = opts('ubicacion', r.ubicacion); }
   localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
 }
 
@@ -273,7 +292,7 @@ function stop() {
 }
 
 // Mismas columnas y en el mismo orden que "Inventario IT - Planilla para importar.xlsx".
-// Por ahora se completan Tag, Modelo, N° de serie y Ubicación.
+// Por ahora se completan Tag, Tipo, Modelo, N° de serie, Estado y Ubicación.
 const COLS = ['Tag', 'Usuario', 'Email', 'Posición', 'Área', 'Contratación', 'Tipo', 'Marca', 'Modelo', 'Año',
   'N° de serie', 'Estado', 'Condición', 'Ubicación', 'Fecha de compra', 'Costo', 'Moneda', 'Proveedor', 'Factura',
   'Link factura', 'Garantía hasta', 'Notas', 'RAM', 'Disco', 'N° de solicitud de gasto', 'N° de orden de compra'];
@@ -286,7 +305,7 @@ async function exportCSV() {
     return list.querySelector('.miss')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
   const q = s => `"${String(s ?? '').replace(/"/g, '""')}"`;
-  const data = rows.map(r => ({ 'Tag': r.tag, 'Modelo': r.modelo, 'N° de serie': r.serial, 'Ubicación': r.ubicacion }));
+  const data = rows.map(r => ({ 'Tag': r.tag, 'Tipo': r.tipo, 'Modelo': r.modelo, 'N° de serie': r.serial, 'Estado': r.estado, 'Ubicación': r.ubicacion }));
   const lines = [COLS, ...data.map(d => COLS.map(c => d[c]))];
   // BOM + ";" para que Excel en español lo abra con acentos y columnas bien
   const csv = '\ufeff' + lines.map(l => l.map(q).join(';')).join('\r\n');
@@ -309,29 +328,33 @@ $('#zoom').onclick = e => { const z = e.target.closest('button')?.dataset.z; if 
 $('#open').onclick = () => { stop(); home.hidden = true; panel.hidden = false; };
 $('#back').onclick = () => { sel = null; render(); panel.hidden = true; home.hidden = false; };
 $('#csv').onclick = exportCSV;
-// Ubicación: desde la ficha (registro actual) o desde cada registro de la lista
+// Ubicación desde la ficha (registro actual); en la lista, Ubicación / Estado / Tipo de cada registro
 $('#ubic').onchange = e => { rows[cur].ubicacion = e.target.value; render(); };
 list.addEventListener('change', e => {
-  const i = e.target.dataset.u;
-  if (i != null) { rows[+i].ubicacion = e.target.value; render(); }
+  const { f, r } = e.target.dataset;
+  if (f) { rows[+r][f] = e.target.value; render(); }
 });
-// Seleccionar: marca uno, varios o todos para asignarles ubicación/modelo o borrarlos
+// Seleccionar: marca uno, varios o todos para asignarles los mismos valores o borrarlos
+const bulk = () => [...document.querySelectorAll('[data-b]')];
 $('#pick').onclick = () => {
   if (!rows.length) return alert('No hay registros');
   sel = new Set();
-  $('#bUbic').innerHTML = '<option value="">No cambiar</option>' + UBIC.map(u => `<option>${u}</option>`).join('');
+  bulk().forEach(s => s.innerHTML = opts(s.dataset.b, '', 'No cambiar'));
   $('#bModelo').value = '';
   // Sugiere los modelos ya cargados para escribirlos igual en todos
   $('#modelos').innerHTML = [...new Set(rows.map(r => r.modelo).filter(Boolean))].map(m => `<option value="${esc(m)}">`).join('');
   render();
 };
 function canApply() {
-  $('#apply').disabled = !sel?.size || !($('#bUbic').value || $('#bModelo').value.trim());
+  $('#apply').disabled = !sel?.size || !(bulk().some(s => s.value) || $('#bModelo').value.trim());
 }
-$('#bUbic').onchange = $('#bModelo').oninput = canApply;
+$('#bulk').onchange = $('#bulk').oninput = canApply;
 $('#apply').onclick = () => {
-  const u = $('#bUbic').value, m = $('#bModelo').value.trim();
-  sel.forEach(i => { if (u) rows[i].ubicacion = u; if (m) rows[i].modelo = m; });
+  // Solo se aplican los campos elegidos; los que quedan en "No cambiar" no se tocan
+  const vals = Object.fromEntries(bulk().filter(s => s.value).map(s => [s.dataset.b, s.value]));
+  const m = $('#bModelo').value.trim();
+  if (m) vals.modelo = m;
+  sel.forEach(i => Object.assign(rows[i], vals));
   sel = null;
   render();
 };
