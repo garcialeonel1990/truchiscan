@@ -69,7 +69,18 @@
   .row .mono { font: 600 20px var(--mono); }
   .row .val.empty { color: var(--text3); font: 400 17px system-ui; }
   .row .ic { color: var(--text3); }
-  .row[data-f] .ic { color: var(--accent-text); }
+  /* Tag y Serial: se escriben a mano o se escanean con el botón de cámara */
+  .code-row { display: flex; align-items: center; gap: var(--s3); min-height: var(--tap-main); padding: var(--s2) 0; border-top: 1px solid var(--hair); }
+  .code-row label { width: 92px; flex: none; color: var(--text3); font-size: 16px; }
+  .code-in { flex: 1; min-width: 0; height: var(--tap); padding: 0 var(--s3); border: 1px solid var(--sep); border-radius: var(--r-ctl);
+    background: var(--bg); color: var(--text); font: 600 18px var(--mono); text-transform: uppercase; }
+  .code-in::placeholder { color: var(--text3); font: 400 16px system-ui; text-transform: none; }
+  .code-in:focus { outline: 3px solid var(--accent-text); outline-offset: 1px; }
+  .code-in.bad { border-color: var(--warn-border); }
+  .cam-btn { flex: none; display: grid; place-items: center; width: var(--tap); height: var(--tap); border-radius: var(--r-ctl);
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-text); }
+  .cam-btn:active { transform: scale(.95); }
+  .code-msg { margin: calc(var(--s1) * -1) 0 var(--s2) 104px; color: var(--warn); font-size: 16px; }
   .req { flex: none; padding: 2px var(--s2); border: 1px solid var(--warn-border); border-radius: 999px; color: var(--warn); font: 600 16px system-ui; }
   .empty-state { padding: var(--s6) var(--s5); text-align: center; }
   .empty-state > .ic { width: 48px; height: 48px; color: var(--accent-text); stroke-width: 1.6; }
@@ -78,9 +89,10 @@
   .steps { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin: var(--s4) 0 0; padding: 0; list-style: none; counter-reset: s; }
   .steps li { counter-increment: s; padding: var(--s1) var(--s3); border-radius: 999px; background: var(--fill); color: var(--text); font-size: 16px; }
   .steps li::before { content: counter(s) " · "; color: var(--text2); }
+  .steps.opt li::before { content: none; }
 
   /* ===== Acción principal fija abajo (zona del pulgar) ===== */
-  #home { padding-bottom: calc(var(--tabs-h) + 190px + env(safe-area-inset-bottom)); }
+  #home { padding-bottom: calc(var(--tabs-h) + 150px + env(safe-area-inset-bottom)); }
   .dock { position: fixed; z-index: 5; left: 50%; bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: 100%; max-width: 600px;
     display: grid; gap: var(--s2); padding: var(--s5) var(--s4) var(--s3); background: linear-gradient(to bottom, transparent, var(--bg) var(--s5)); }
   #msg { margin: 0; padding: var(--s3) var(--s4); border-radius: var(--r-ctl); background: var(--surface); color: var(--text2); font-size: 16px; text-align: center; overflow-wrap: anywhere; }
@@ -171,9 +183,7 @@
   .chips button[aria-pressed="true"] { background: var(--accent); box-shadow: none; color: var(--on-accent); font-weight: 600; }
   .input { width: 100%; min-height: var(--tap-main); padding: 0 var(--s4); border: 1px solid var(--sep); border-radius: var(--r-ctl); background: var(--bg); color: var(--text); font: 17px system-ui; }
   .input:focus { outline: 3px solid var(--accent-text); outline-offset: 1px; }
-  .ro { display: flex; justify-content: space-between; gap: var(--s3); min-height: var(--tap); align-items: center; border-bottom: 1px solid var(--hair); }
-  .ro span:first-child { color: var(--text3); font-size: 16px; }
-  .ro span:last-child { font: 600 17px var(--mono); overflow-wrap: anywhere; text-align: right; }
+  .field .code-in { width: 100%; height: var(--tap-main); }
 </style>
 </head>
 <body>
@@ -198,17 +208,23 @@
 
   <section id="empty" class="card empty-state">
     <svg class="ic" aria-hidden="true"><use href="#i-scan"/></svg>
-    <h2>Empezá por el Tag</h2>
-    <p>Tocá <b>Escanear Tag</b> y apuntá al código del equipo.</p>
-    <ol class="steps"><li>Tag</li><li>Serial</li><li>Ubicación, estado y tipo</li></ol>
+    <h2>Cargá un equipo</h2>
+    <p>Tocá <b>Nuevo equipo</b> y completá lo que tengas: escaneando con la cámara o escribiendo a mano.</p>
+    <ul class="steps opt"><li>Tag</li><li>Serial</li><li>Ubicación</li><li>Estado</li><li>Tipo</li></ul>
   </section>
 
   <section id="card" class="card" aria-labelledby="cardTitle" hidden>
     <div class="card-h"><h2 id="cardTitle">Equipo</h2><span id="prog" class="chip"></span></div>
     <p id="cardDate" class="meta"></p>
     <div id="bar5" class="bar5" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-    <button class="row" data-f="tag"><span class="lbl">Tag</span><span id="tag" class="val mono"></span><span class="sr">Escanear Tag</span><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg></button>
-    <button class="row" data-f="serial"><span class="lbl">Serial</span><span id="serial" class="val mono"></span><span class="sr">Escanear Serial</span><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg></button>
+    <div class="code-row"><label for="tag">Tag</label>
+      <input id="tag" class="code-in" data-code="tag" placeholder="Escribí o escaneá" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next">
+      <button class="cam-btn" data-f="tag" aria-label="Escanear Tag con la cámara"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg></button></div>
+    <p id="msg-tag" class="code-msg" role="alert" hidden></p>
+    <div class="code-row"><label for="serial">Serial</label>
+      <input id="serial" class="code-in" data-code="serial" placeholder="Escribí o escaneá" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done">
+      <button class="cam-btn" data-f="serial" aria-label="Escanear Serial con la cámara"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg></button></div>
+    <p id="msg-serial" class="code-msg" role="alert" hidden></p>
     <button class="row" data-pick="ubicacion"><span class="lbl">Ubicación</span><span id="v-ubicacion" class="val"></span><span id="reqU" class="req">Obligatoria</span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
     <button class="row" data-pick="estado"><span class="lbl">Estado</span><span id="v-estado" class="val"></span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
     <button class="row" data-pick="tipo"><span class="lbl">Tipo</span><span id="v-tipo" class="val"></span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
@@ -216,7 +232,6 @@
 
   <div class="dock">
     <p id="msg" role="status" aria-live="polite" hidden></p>
-    <button id="skip" class="btn-text" hidden>Sin serial · escanear otro equipo</button>
     <button id="scan" class="btn-main"></button>
   </div>
 </main>
@@ -345,8 +360,10 @@ function openEdit(idx) {
     `<div class="chips" role="group" aria-labelledby="lab-${f}">` +
     FIELDS[f].opts.map(o => `<button data-v="${esc(o)}" aria-pressed="${r[f] === o}">${esc(o)}</button>`).join('') + '</div></div>';
   const modelos = [...new Set(rows.map(x => x.modelo).filter(Boolean))];
-  $('#bulk').innerHTML = (one ? `<div class="ro"><span>Tag</span><span>${esc(r.tag || '—')}</span></div>` +
-      `<div class="ro" style="margin-bottom:var(--s3)"><span>Serial</span><span>${esc(r.serial || '—')}</span></div>` : '') +
+  const codeField = (f, label) => `<div class="field"><div class="field-h"><label for="e-${f}">${label}</label></div>` +
+    `<input id="e-${f}" class="code-in" data-ecode="${f}" value="${esc(r[f] || '')}" placeholder="Escribí el ${label}" autocomplete="off" autocapitalize="characters" spellcheck="false">` +
+    `<p id="em-${f}" class="code-msg" style="margin:var(--s1) 0 0" role="alert" hidden></p></div>`;
+  $('#bulk').innerHTML = (one ? codeField('tag', 'Tag') + codeField('serial', 'Serial') : '') +
     Object.keys(FIELDS).map(field).join('') +
     `<div class="field"><div class="field-h"><label for="bModelo">Modelo</label></div>` +
     `<input id="bModelo" class="input" list="modelos" autocomplete="off" enterkeyhint="done" placeholder="${one ? 'Escribí el modelo' : 'No cambiar'}" value="${esc(r.modelo || '')}">` +
@@ -359,13 +376,28 @@ function editVals() {
   const v = {};
   $('#bulk').querySelectorAll('.field[data-k]').forEach(d => { v[d.dataset.k] = d.querySelector('[aria-pressed="true"]')?.dataset.v || ''; });
   v.modelo = $('#bModelo').value.trim();
+  $('#bulk').querySelectorAll('[data-ecode]').forEach(i => { v[i.dataset.ecode] = i.value.trim().toUpperCase(); });
   return v;
+}
+// En la hoja de un equipo: Tag / Serial no pueden repetirse con otro equipo ni entre sí
+function editDup() {
+  if (editing.length !== 1) return false;
+  const v = editVals(); let bad = false;
+  for (const f of ['tag', 'serial']) {
+    const code = v[f], other = f === 'tag' ? v.serial : v.tag;
+    const i = code ? rows.findIndex((r, j) => j !== editing[0] && (r.tag === code || r.serial === code)) : -1;
+    const warn = i >= 0 ? `Ya está en la lista (equipo ${i + 1})` : code && code === other ? 'Es el mismo código que el otro campo' : '';
+    $('#em-' + f).textContent = warn; $('#em-' + f).hidden = !warn;
+    $('#e-' + f).classList.toggle('bad', !!warn);
+    bad ||= !!warn;
+  }
+  return bad;
 }
 function canApply() {
   const one = editing.length === 1, v = editVals();
-  const any = Object.values(v).some(Boolean);
-  $('#apply').disabled = !one && !any;
-  $('#apply').textContent = one ? 'Guardar' : any ? `Asignar a ${editing.length}` : 'Elegí al menos un valor';
+  const any = Object.values(v).some(Boolean), dup = editDup();
+  $('#apply').disabled = one ? dup : !any;
+  $('#apply').textContent = one ? (dup ? 'Corregí el código repetido' : 'Guardar') : any ? `Asignar a ${editing.length}` : 'Elegí al menos un valor';
 }
 
 function render() {
@@ -397,11 +429,45 @@ function render() {
 // ===== Escanear: ficha del registro actual y botón principal según el paso =====
 const svg = id => `<svg class="ic" aria-hidden="true"><use href="#i-${id}"/></svg>`;
 const STEP = { tag: 'Tag', serial: 'Serial' };
-// Qué falta escanear: Tag → Serial → listo (siguiente equipo)
-const nextScan = r => !r ? 'new' : !r.tag ? 'tag' : !r.serial ? 'serial' : 'new';
+const blank = r => !r.tag && !r.serial && !r.ubicacion && !r.estado && !r.tipo && !r.modelo;
+// Nuevo equipo: ficha vacía; Tag y Serial se escanean o escriben, ninguno es obligatorio.
+// Si la ficha actual sigue vacía, se reutiliza en vez de sumar otra.
+// Guarda el Tag / Serial que se está escribiendo (con el teclado abierto todavía no se guardó)
+function flush() {
+  const a = document.activeElement;
+  if (a?.dataset?.code) { typed(a, true); a.blur(); }
+}
+function newRecord() {
+  flush();
+  if (!rows[cur] || !blank(rows[cur])) {
+    rows.push({ tag: '', serial: '', date: new Date().toLocaleString('es-AR') });
+    cur = rows.length - 1;
+  }
+  render();
+  $('#tag').focus({ preventScroll: true });
+}
+// Código escrito a mano: mismo control de repetidos que al escanear (salvo el propio registro)
+function dupOf(code, f) {
+  const i = rows.findIndex((r, j) => j !== cur && (r.tag === code || r.serial === code));
+  return i < 0 ? '' : `Ya está en la lista (equipo ${i + 1}): ${code}`;
+}
+function typed(input, commit) {
+  const f = input.dataset.code, r = rows[cur];
+  if (!r) return;
+  const code = input.value.trim().toUpperCase();
+  const own = f === 'tag' ? r.serial : r.tag; // no puede ser igual al otro campo del mismo equipo
+  const warn = !code ? '' : dupOf(code, f) || (code === own ? `Es el mismo código que el ${f === 'tag' ? 'Serial' : 'Tag'}` : '');
+  $('#msg-' + f).textContent = warn;
+  $('#msg-' + f).hidden = !warn;
+  input.classList.toggle('bad', !!warn);
+  if (commit && !warn && r[f] !== code) { r[f] = code; input.value = code; render(); }
+}
 
+let shown = null; // equipo que muestra la ficha
 function renderCard() {
   const r = rows[cur];
+  const changed = r !== shown;
+  shown = r;
   $('#empty').hidden = !!r;
   $('#card').hidden = !r;
   if (r) {
@@ -414,8 +480,8 @@ function renderCard() {
     [...$('#bar5').children].forEach((b, i) => b.classList.toggle('on', done[i]));
     $('#bar5').classList.toggle('done', n === 5);
     for (const f of ['tag', 'serial']) {
-      $('#' + f).textContent = r[f] || 'Tocá para escanear';
-      $('#' + f).classList.toggle('empty', !r[f]);
+      const inp = $('#' + f);
+      if (changed || document.activeElement !== inp) { inp.value = r[f] || ''; inp.classList.remove('bad'); $('#msg-' + f).hidden = true; }
     }
     for (const f of Object.keys(FIELDS)) {
       $('#v-' + f).textContent = r[f] || `Elegí ${FIELDS[f].label}`;
@@ -428,11 +494,8 @@ function renderCard() {
 
 function updateMain() {
   const live = !!stream || busy;
-  const t = nextScan(rows[cur]);
   btn.classList.toggle('alt', live);
-  btn.innerHTML = live ? svg('stop') + 'Detener'
-    : svg('scan') + (t === 'serial' ? 'Escanear Serial' : t === 'tag' ? 'Escanear Tag' : rows[cur] ? 'Escanear siguiente equipo' : 'Escanear Tag');
-  $('#skip').hidden = live || t !== 'serial';
+  btn.innerHTML = live ? svg('stop') + 'Detener' : svg('scan') + 'Nuevo equipo';
 }
 
 function setMsg(text) {
@@ -663,13 +726,22 @@ async function exportCSV() {
 }
 
 // El botón principal hace el paso que falta: Tag → Serial → siguiente equipo
-btn.onclick = () => stream ? stop() : start(nextScan(rows[cur]));
-$('#skip').onclick = () => start('new');
+// Botón principal: nueva ficha (o detener la cámara si está abierta). La cámara se abre desde cada campo.
+btn.onclick = () => stream ? stop() : newRecord();
 $('#card').onclick = e => {
   const b = e.target.closest('button');
+  if (b) flush();
   if (b?.dataset.f) start(b.dataset.f);
   else if (b?.dataset.pick) openSheet(b.dataset.pick);
 };
+// Tag / Serial a mano: avisa repetidos mientras se escribe y guarda al salir del campo o tocar Enter
+$('#card').addEventListener('input', e => { if (e.target.dataset.code) typed(e.target, false); });
+$('#card').addEventListener('change', e => { if (e.target.dataset.code) typed(e.target, true); });
+$('#card').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !e.target.dataset.code) return;
+  e.preventDefault();
+  e.target.dataset.code === 'tag' ? $('#serial').focus() : e.target.blur();
+});
 $('#sheetOpts').onclick = e => { const o = e.target.closest('.opt'); if (o) setField(o.dataset.v); };
 $('#sheetClear').onclick = () => setField('');
 $('#sheetClose').onclick = () => $('#sheet').close();
@@ -680,7 +752,10 @@ const tab = toList => {
   $('#open').toggleAttribute('aria-current', toList);
   $(toList ? '#open' : '#back').setAttribute('aria-current', 'page');
 };
-$('#open').onclick = () => { stop(); home.hidden = true; panel.hidden = false; tab(true); scrollTo(0, 0); };
+$('#open').onclick = () => {
+  flush();
+  if (rows[cur] && blank(rows[cur])) { rows.splice(cur, 1); cur = rows.length - 1; render(); }
+  stop(); home.hidden = true; panel.hidden = false; tab(true); scrollTo(0, 0); };
 $('#back').onclick = () => { sel = null; render(); panel.hidden = true; home.hidden = false; tab(false); scrollTo(0, 0); };
 $('#csv').onclick = exportCSV;
 // Lista: tocar un registro lo abre para editar; en modo selección lo marca o desmarca
@@ -707,7 +782,7 @@ $('#bulk').onclick = e => {
 };
 $('#bulk').oninput = canApply;
 $('#apply').onclick = () => {
-  if (!editing.length) return;
+  if (!editing.length || editDup()) return;
   const vals = editVals();
   if (editing.length === 1) {
     // Un registro: se guarda lo que cambió en la hoja (vacío = sin valor); lo que no cambió no se toca
