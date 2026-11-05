@@ -559,7 +559,7 @@ let ocr, ocrP, ocrMode = false;
 function getOcr() {
   ocrP ??= (async () => {
     const w = await (await import(TESS)).default.createWorker('eng');
-    await w.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', tessedit_pageseg_mode: '7' });
+    await w.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-', tessedit_pageseg_mode: '7' });
     return (ocr = w);
   })().catch(e => { ocrP = null; throw e; });
   return ocrP;
@@ -602,13 +602,29 @@ function cropBand(angle) {
     wB += hist[t]; if (!wB) continue; const wF = lum.length - wB; if (!wF) break; sumB += t * hist[t];
     const v = wB * wF * (sumB / wB - (sum - sumB) / wF) ** 2; if (v > best) { best = v; th = t; }
   }
-  for (let i = 0, j = 0; i < p.length; i += 4, j++) p[i] = p[i + 1] = p[i + 2] = lum[j] > th ? 255 : 0;
+  const dark = new Uint8Array(w * h);
+  for (let j = 0; j < dark.length; j++) dark[j] = lum[j] <= th ? 1 : 0;
+  // Lo oscuro que toca el borde del recuadro es el equipo o la sombra de la cinta, no texto: se pinta de blanco
+  const st = [];
+  for (let x = 0; x < w; x++) st.push(x, (h - 1) * w + x);
+  for (let y = 0; y < h; y++) st.push(y * w, y * w + w - 1);
+  while (st.length) {
+    const j = st.pop();
+    if (!dark[j]) continue;
+    dark[j] = 0;
+    const x = j % w, y = (j / w) | 0;
+    if (x > 0) st.push(j - 1); if (x < w - 1) st.push(j + 1); if (y > 0) st.push(j - w); if (y < h - 1) st.push(j + w);
+  }
+  for (let i = 0, j = 0; i < p.length; i += 4, j++) p[i] = p[i + 1] = p[i + 2] = dark[j] ? 0 : 255;
   g.putImageData(d, 0, 0);
   return band;
 }
-// Código de la etiqueta: letras y números, de 4 a 20, con al menos una letra y un número (KB0055, H40001)
-const labelCode = t => t.toUpperCase().replace(/[^A-Z0-9\s]/g, '').split(/\s+/)
-  .filter(w => w.length >= 4 && w.length <= 20 && /\d/.test(w) && /[A-Z]/.test(w)).sort((a, b) => b.length - a.length)[0] || '';
+// Código de la etiqueta: letras, números y guion, de 3 a 20, con al menos una letra y un número (KB0035, H40001, IT-7, PC-0045).
+// En la parte final con números, la O se toma como 0 (en la letra de la P-touch son casi iguales).
+const labelCode = t => t.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').split(/\s+/)
+  .map(w => w.replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-'))
+  .map(w => w.replace(/^([A-Z-]*?)([O0-9]*[0-9][O0-9]*)$/, (_, a, b) => a + b.replace(/O/g, '0')))
+  .filter(w => w.length >= 3 && w.length <= 20 && /\d/.test(w) && /[A-Z]/.test(w)).sort((a, b) => b.length - a.length)[0] || '';
 // Una lectura: primero derecho; si no sale segura, prueba la etiqueta un poco girada
 async function readLabel() {
   let got = '', conf = 0;
@@ -619,7 +635,7 @@ async function readLabel() {
     if (w && data.confidence > conf) { got = w; conf = data.confidence; }
     if (w && data.confidence >= 70) break;
   }
-  return conf >= 60 ? got : '';
+  return conf >= 45 ? got : ''; // además se pide la misma lectura 2 veces seguidas
 }
 
 let backup; // Android: lector de respaldo para QR y DataMatrix (el mismo que usa el iPhone)
