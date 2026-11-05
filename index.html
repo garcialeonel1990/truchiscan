@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
-<title>Escáner</title>
+<title>Devices Scanner</title>
 <style>
   /* ===== Design tokens (contraste WCAG AA medido en claro y oscuro) ===== */
   :root {
@@ -33,7 +33,7 @@
   /* ===== Base ===== */
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { background: var(--bg); }
-  body { margin: 0 auto; max-width: 600px; padding: calc(env(safe-area-inset-top) + var(--s2)) var(--s4) 0;
+  body { margin: 0 auto; max-width: 600px; padding: calc(env(safe-area-inset-top) + var(--s5)) var(--s4) 0;
     background: var(--bg); color: var(--text); font: 17px/1.35 -apple-system, system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
   [hidden] { display: none !important; }
   h1 { margin: var(--s2) 0 var(--s4); font: 700 28px/1.2 -apple-system, system-ui, sans-serif; }
@@ -82,14 +82,14 @@
   .cam-btn:active { transform: scale(.95); }
   .code-msg { margin: calc(var(--s1) * -1) 0 var(--s2) 104px; color: var(--warn); font-size: 16px; }
   .req { flex: none; padding: 2px var(--s2); border: 1px solid var(--warn-border); border-radius: 999px; color: var(--warn); font: 600 16px system-ui; }
-  .empty-state { padding: var(--s6) var(--s5); text-align: center; }
-  .empty-state > .ic { width: 48px; height: 48px; color: var(--accent-text); stroke-width: 1.6; }
-  .empty-state h2 { margin: var(--s3) 0 var(--s2); font: 600 20px system-ui; }
-  .empty-state p { margin: 0; color: var(--text2); }
-  .steps { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin: var(--s4) 0 0; padding: 0; list-style: none; counter-reset: s; }
-  .steps li { counter-increment: s; padding: var(--s1) var(--s3); border-radius: 999px; background: var(--fill); color: var(--text); font-size: 16px; }
-  .steps li::before { content: counter(s) " · "; color: var(--text2); }
-  .steps.opt li::before { content: none; }
+  /* Sin equipo en pantalla: el recuadro es el botón "Nuevo equipo" */
+  .big-new { display: flex; flex-direction: column; align-items: center; gap: var(--s2); width: 100%; padding: var(--s6) var(--s5);
+    box-shadow: inset 0 0 0 2px var(--accent-text); text-align: center; transition: transform var(--dur); }
+  .big-new:active { transform: scale(.98); }
+  .plus-circle { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; background: var(--accent); color: var(--on-accent); }
+  .plus-circle .ic { width: 28px; height: 28px; stroke-width: 2.5; }
+  .big-new .t { color: var(--accent-text); font: 600 20px system-ui; }
+  .big-new .s { color: var(--text2); font-size: 16px; }
 
   /* ===== Acción principal fija abajo (zona del pulgar) ===== */
   #home { padding-bottom: calc(var(--tabs-h) + 150px + env(safe-area-inset-bottom)); }
@@ -133,6 +133,10 @@
   .head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: var(--tap); margin: var(--s2) 0 var(--s1); }
   .head h1 { margin: 0; }
   .head .btn-text { padding: 0 var(--s2); }
+  /* Botón redondo arriba a la derecha: empezar un escaneo nuevo */
+  .icon-btn { flex: none; display: grid; place-items: center; width: var(--tap); height: var(--tap); border-radius: 50%; background: var(--fill); color: var(--text); }
+  .icon-btn:active { transform: scale(.94); }
+  .icon-btn:disabled { opacity: .4; cursor: default; transform: none; }
   .summary { margin: 0 0 var(--s4); color: var(--text2); font-size: 16px; }
   .summary b { color: var(--warn); font-weight: 600; }
   .group { margin: 0; padding: 0; list-style: none; border-radius: var(--r-card); background: var(--surface); overflow: hidden; }
@@ -192,6 +196,8 @@
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-cam" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-14.1 5.2M4 12a8 8 0 0 1 14.1-5.2M18.5 3v4h-4M5.5 21v-4h4"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
   <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></symbol>
@@ -199,19 +205,21 @@
 </svg>
 
 <main id="home">
-  <h1>Escanear</h1>
+  <div class="head">
+    <h1>Devices Scanner</h1>
+    <button id="reset" class="icon-btn" aria-label="Empezar un escaneo nuevo: borra la lista actual"><svg class="ic" aria-hidden="true"><use href="#i-reset"/></svg></button>
+  </div>
   <div id="cam" hidden>
     <p id="aim" class="pill"></p>
     <div id="zoom" role="group" aria-label="Zoom" hidden><button data-z="1" aria-label="Zoom 1x">1x</button><button data-z="2" aria-label="Zoom 2x">2x</button><button data-z="3" aria-label="Zoom 3x">3x</button></div>
     <div id="ok" role="status" hidden></div>
   </div>
 
-  <section id="empty" class="card empty-state">
-    <svg class="ic" aria-hidden="true"><use href="#i-scan"/></svg>
-    <h2>Cargá un equipo</h2>
-    <p>Tocá <b>Nuevo equipo</b> y completá lo que tengas: escaneando con la cámara o escribiendo a mano.</p>
-    <ul class="steps opt"><li>Tag</li><li>Serial</li><li>Ubicación</li><li>Estado</li><li>Tipo</li></ul>
-  </section>
+  <button id="empty" class="card big-new">
+    <span class="plus-circle" aria-hidden="true"><svg class="ic"><use href="#i-plus"/></svg></span>
+    <span class="t">Nuevo equipo</span>
+    <span id="emptySub" class="s">Tocá para cargar el primero</span>
+  </button>
 
   <section id="card" class="card" aria-labelledby="cardTitle" hidden>
     <div class="card-h"><h2 id="cardTitle">Equipo</h2><span id="prog" class="chip"></span></div>
@@ -422,6 +430,7 @@ function render() {
     $('#all').setAttribute('aria-checked', sel.size === rows.length);
   }
   $('#count').textContent = rows.length;
+  $('#reset').disabled = !rows.length;
   renderCard();
   localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
 }
@@ -469,6 +478,8 @@ function renderCard() {
   shown = r;
   $('#empty').hidden = !!r;
   $('#card').hidden = !r;
+  $('#home .dock').hidden = !r;
+  $('#emptySub').textContent = rows.length ? 'Tocá para cargar otro' : 'Tocá para cargar el primero';
   if (r) {
     const done = [r.tag, r.serial, r.ubicacion, r.estado, r.tipo].map(Boolean);
     const n = done.filter(Boolean).length;
@@ -727,6 +738,7 @@ async function exportCSV() {
 // El botón principal hace el paso que falta: Tag → Serial → siguiente equipo
 // Botón principal: nueva ficha (o detener la cámara si está abierta). La cámara se abre desde cada campo.
 btn.onclick = () => stream ? stop() : newRecord();
+$('#empty').onclick = newRecord;
 $('#card').onclick = e => {
   const b = e.target.closest('button');
   if (b) flush();
@@ -806,6 +818,18 @@ $('#del').onclick = () => {
   cur = rows.indexOf(shown); // si se borró el que estaba en pantalla, la ficha se oculta
   sel = null;
   render();
+};
+// Empezar un escaneo nuevo: borra todos los registros. Se guarda la lista vacía, así al recargar no vuelven.
+$('#reset').onclick = () => {
+  const n = rows.length;
+  if (!n || !confirm(`¿Empezar un escaneo nuevo?\n\nSe borran los ${n} equipo${n > 1 ? 's' : ''} de la lista. Si los necesitás, exportá el CSV antes.`)) return;
+  stop();
+  if ($('#sheet').open) $('#sheet').close();
+  rows = [];
+  cur = -1;
+  sel = null;
+  render(); // guarda la lista vacía en la clave "codigos"
+  scrollTo(0, 0);
 };
 document.onvisibilitychange = () => document.hidden && stop();
 
