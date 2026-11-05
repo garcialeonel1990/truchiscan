@@ -562,7 +562,7 @@ let ocr, ocrP, ocrMode = false;
 function getOcr() {
   ocrP ??= (async () => {
     const w = await (await import(TESS)).default.createWorker('eng');
-    await w.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-', tessedit_pageseg_mode: '7' });
+    await w.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-', tessedit_pageseg_mode: '7' });
     return (ocr = w);
   })().catch(e => { ocrP = null; throw e; });
   return ocrP;
@@ -586,13 +586,14 @@ const band = document.createElement('canvas');
 function cropBand(angle) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
-  const w = Math.round(b.width / k), h = Math.round(b.height / k);
-  const sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
+  const sw = b.width / k, sh = b.height / k, sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
+  // Se lleva a 120 px de alto: con letras muy grandes el lector duplica caracteres (KB0035 → KB00035)
+  const q = Math.min(1, 120 / sh), w = Math.max(1, Math.round(sw * q)), h = Math.max(1, Math.round(sh * q));
   band.width = w; band.height = h;
   const g = band.getContext('2d', { willReadFrequently: true });
   g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
   g.translate(w / 2, h / 2); g.rotate(angle * Math.PI / 180);
-  g.drawImage(video, sx, sy, w, h, -w / 2, -h / 2, w, h);
+  g.drawImage(video, sx, sy, sw, sh, -w / 2, -h / 2, w, h);
   g.setTransform(1, 0, 0, 1, 0, 0);
   const d = g.getImageData(0, 0, w, h), p = d.data, lum = new Uint8Array(w * h), hist = new Array(256).fill(0);
   for (let i = 0, j = 0; i < p.length; i += 4, j++) {
@@ -622,12 +623,12 @@ function cropBand(angle) {
   g.putImageData(d, 0, 0);
   return band;
 }
-// Código de la etiqueta: letras, números y guion, de 3 a 20, con al menos una letra y un número (KB0035, H40001, IT-7, PC-0045).
-// En la parte final con números, la O se toma como 0 (en la letra de la P-touch son casi iguales).
+// Código de la etiqueta: letras (mayúsculas o minúsculas), números y guion, de 3 a 20; se guarda en mayúsculas.
+// Sirven KB0035, it-7, IT-DEPOSITO, 0035. En la parte final con números, O → 0 e I/L → 1 (en la P-touch se parecen).
 const labelCode = t => t.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').split(/\s+/)
   .map(w => w.replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-'))
-  .map(w => w.replace(/^([A-Z-]*?)([O0-9]*[0-9][O0-9]*)$/, (_, a, b) => a + b.replace(/O/g, '0')))
-  .filter(w => w.length >= 3 && w.length <= 20 && /\d/.test(w) && /[A-Z]/.test(w)).sort((a, b) => b.length - a.length)[0] || '';
+  .map(w => w.replace(/^([A-Z-]*?)([OIL0-9]*[0-9][OIL0-9]*)$/, (_, a, b) => a + b.replace(/O/g, '0').replace(/[IL]/g, '1')))
+  .filter(w => w.length >= 3 && w.length <= 20).sort((a, b) => b.length - a.length)[0] || '';
 // Una lectura: primero derecho; si no sale segura, prueba la etiqueta un poco girada
 async function readLabel() {
   let got = '', conf = 0;
