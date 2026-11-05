@@ -47,10 +47,19 @@
   #cam video { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); visibility: hidden; }
   .pill { position: absolute; z-index: 1; left: 50%; transform: translateX(-50%); margin: 0; padding: var(--s2) var(--s4); border-radius: 999px; background: #000000B3; color: #FFF; font: 600 16px system-ui; white-space: nowrap; }
   #aim { top: var(--s3); }
+  /* Tag: elegir qué se lee, código de barras/QR o texto de una etiqueta impresa (P-touch) */
+  #mode { position: absolute; z-index: 1; left: 50%; top: var(--s3); transform: translateX(-50%); display: flex; gap: var(--s1); padding: var(--s1);
+    border-radius: 999px; background: #000000B3; }
+  #mode button { min-height: var(--tap); padding: 0 var(--s4); border-radius: 999px; color: #FFF; font: 600 16px system-ui; white-space: nowrap; }
+  #mode button[aria-pressed="true"] { background: #FFF; color: #000; }
+  #mode:not([hidden]) + #aim { top: 72px; }
+  #mode, #aim, #zoom { z-index: 2; }
+  #band { position: absolute; z-index: 1; left: 5%; right: 5%; top: 52%; height: 26%; transform: translateY(-50%);
+    border: 3px solid #FFD60A; border-radius: var(--r-ctl); box-shadow: 0 0 0 100vmax #00000059; pointer-events: none; }
   #zoom { position: absolute; z-index: 1; left: 50%; bottom: var(--s3); transform: translateX(-50%); display: flex; gap: var(--s1); padding: var(--s1); border-radius: 999px; background: #000000B3; }
   #zoom button { width: var(--tap); height: var(--tap); border-radius: 50%; color: #FFF; font: 600 16px system-ui; }
   #zoom button.on { background: #FFFFFF33; color: #FFD60A; }
-  #ok { position: absolute; z-index: 2; inset: 0; display: flex; align-items: center; justify-content: center; padding: var(--s4); background: #000000CC; color: #32D74B; font: 700 24px var(--mono); text-align: center; word-break: break-all; }
+  #ok { position: absolute; z-index: 3; inset: 0; display: flex; align-items: center; justify-content: center; padding: var(--s4); background: #000000CC; color: #32D74B; font: 700 24px var(--mono); text-align: center; word-break: break-all; }
 
   /* ===== Escanear: ficha del equipo ===== */
   .card { margin-bottom: var(--s4); padding: var(--s4); border-radius: var(--r-card); background: var(--surface); }
@@ -210,7 +219,9 @@
     <button id="reset" class="icon-btn" aria-label="Empezar un escaneo nuevo: borra la lista actual"><svg class="ic" aria-hidden="true"><use href="#i-reset"/></svg></button>
   </div>
   <div id="cam" hidden>
+    <div id="mode" role="group" aria-label="Qué leer" hidden><button data-m="code">Código</button><button data-m="label">Etiqueta</button></div>
     <p id="aim" class="pill"></p>
+    <div id="band" hidden></div>
     <div id="zoom" role="group" aria-label="Zoom" hidden><button data-z="1" aria-label="Zoom 1x">1x</button><button data-z="2" aria-label="Zoom 2x">2x</button><button data-z="3" aria-label="Zoom 3x">3x</button></div>
     <div id="ok" role="status" hidden></div>
   </div>
@@ -542,12 +553,88 @@ function beep() {
   o.stop(audio.currentTime + 0.08);
 }
 
+// Lector de texto para etiquetas impresas (Brother P-touch E110), solo para el Tag. Se descarga la primera vez.
+const TESS = 'https://fastly.jsdelivr.net/npm/tesseract.js@7/dist/tesseract.esm.min.js';
+let ocr, ocrP, ocrMode = false;
+function getOcr() {
+  ocrP ??= (async () => {
+    const w = await (await import(TESS)).default.createWorker('eng');
+    await w.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', tessedit_pageseg_mode: '7' });
+    return (ocr = w);
+  })().catch(e => { ocrP = null; throw e; });
+  return ocrP;
+}
+// Cambia entre leer códigos y leer la etiqueta impresa; se recuerda para el próximo Tag
+async function setMode(label) {
+  ocrMode = label;
+  localStorage.setItem('tagMode', label ? 'label' : 'code');
+  $('#mode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.m === 'label') === label)));
+  $('#band').hidden = !label;
+  $('#aim').textContent = label ? 'Poné la etiqueta en el recuadro' : 'Apuntá al código del Tag';
+  if (label && !ocr) {
+    setMsg('Cargando lector de etiquetas… (solo la primera vez)');
+    try { await getOcr(); if (ocrMode) setMsg(''); }
+    catch (e) { setMsg('Error: no se pudo cargar el lector de etiquetas (' + e.message + ')'); }
+  }
+}
+// Toma solo el recuadro amarillo del video, lo endereza (ángulo) y lo pasa a blanco y negro.
+// El gris mezcla el canal más alto con la luminancia: así la cinta amarilla queda clara igual que la blanca.
+const band = document.createElement('canvas');
+function cropBand(angle) {
+  const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
+  const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
+  const w = Math.round(b.width / k), h = Math.round(b.height / k);
+  const sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
+  band.width = w; band.height = h;
+  const g = band.getContext('2d', { willReadFrequently: true });
+  g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+  g.translate(w / 2, h / 2); g.rotate(angle * Math.PI / 180);
+  g.drawImage(video, sx, sy, w, h, -w / 2, -h / 2, w, h);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  const d = g.getImageData(0, 0, w, h), p = d.data, lum = new Uint8Array(w * h), hist = new Array(256).fill(0);
+  for (let i = 0, j = 0; i < p.length; i += 4, j++) {
+    const v = Math.round(0.5 * Math.max(p[i], p[i + 1], p[i + 2]) + 0.5 * (0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]));
+    lum[j] = v; hist[v]++;
+  }
+  let sum = 0, sumB = 0, wB = 0, best = 0, th = 128; // umbral automático (Otsu): se adapta a poca luz y reflejos
+  for (let t = 0; t < 256; t++) sum += t * hist[t];
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue; const wF = lum.length - wB; if (!wF) break; sumB += t * hist[t];
+    const v = wB * wF * (sumB / wB - (sum - sumB) / wF) ** 2; if (v > best) { best = v; th = t; }
+  }
+  for (let i = 0, j = 0; i < p.length; i += 4, j++) p[i] = p[i + 1] = p[i + 2] = lum[j] > th ? 255 : 0;
+  g.putImageData(d, 0, 0);
+  return band;
+}
+// Código de la etiqueta: letras y números, de 4 a 20, con al menos una letra y un número (KB0055, H40001)
+const labelCode = t => t.toUpperCase().replace(/[^A-Z0-9\s]/g, '').split(/\s+/)
+  .filter(w => w.length >= 4 && w.length <= 20 && /\d/.test(w) && /[A-Z]/.test(w)).sort((a, b) => b.length - a.length)[0] || '';
+// Una lectura: primero derecho; si no sale segura, prueba la etiqueta un poco girada
+async function readLabel() {
+  let got = '', conf = 0;
+  for (const a of [0, -8, 8, -15, 15]) {
+    if (!ocrMode || !video) break;
+    const { data } = await ocr.recognize(cropBand(a));
+    const w = labelCode(data.text);
+    if (w && data.confidence > conf) { got = w; conf = data.confidence; }
+    if (w && data.confidence >= 70) break;
+  }
+  return conf >= 60 ? got : '';
+}
+
+let backup; // Android: lector de respaldo para QR y DataMatrix (el mismo que usa el iPhone)
 async function getDetector() {
   if (!detector) {
     // Nativo en Chrome/Android; en Safari/iOS se carga el polyfill
     const BD = window.BarcodeDetector ?? (await import(POLYFILL)).BarcodeDetector;
     const ok = await BD.getSupportedFormats();
     detector = new BD({ formats: FORMATS.filter(f => ok.includes(f)) });
+  }
+  // El lector de Android lee bien los códigos de barras pero no algunos QR (S22): se suma el del iPhone.
+  // Se carga aparte, sin demorar la cámara; si no hay señal, se sigue solo con el de Android.
+  if (window.BarcodeDetector && backup === undefined) {
+    backup = null;
+    import(POLYFILL).then(m => { backup = new m.BarcodeDetector({ formats: ['qr_code', 'data_matrix'] }); }).catch(() => { backup = undefined; });
   }
   return detector;
 }
@@ -566,13 +653,25 @@ function save(code) {
 
 // Lee sobre el cuadro completo; al leer congela la imagen y muestra el código 1,2 s antes de cerrar
 async function loop(s) {
+  let turn = 0, last = '';
   while (stream === s) {
     try {
       fit(); // por si Safari no avisa que la imagen cambió de forma
       if (video.readyState >= 2) {
-        const [hit] = await detector.detect(video);
+        let hit;
+        if (ocrMode) {
+          // Etiqueta impresa: se guarda solo si sale igual en 2 lecturas seguidas (evita guardar una mala lectura)
+          const code = ocr ? await readLabel() : '';
+          if (code && code === last && ocrMode) hit = { rawValue: code };
+          last = code;
+        } else {
+          [hit] = await detector.detect(video);
+          // Si el de Android no encontró nada, prueba el de respaldo (cada 2 vueltas, para no cargar el celular)
+          if (!hit && backup && turn++ % 2 === 0 && stream === s) [hit] = await backup.detect(video);
+        }
         if (hit && stream === s) {
           video.pause();
+          $('#band').hidden = true;
           const warn = save(hit.rawValue), ok = $('#ok');
           ok.textContent = warn || '✓ ' + hit.rawValue;
           ok.style.color = warn ? '#ff9f0a' : '';
@@ -647,6 +746,8 @@ async function start(t) {
     setupZoom();
     $('#aim').textContent = `Apuntá al ${STEP[t] || 'Tag'}`;
     setMsg('');
+    $('#mode').hidden = t !== 'tag';
+    if (t === 'tag') setMode(localStorage.getItem('tagMode') === 'label');
     loop(stream);
   } catch (e) {
     stop();
@@ -700,6 +801,8 @@ function stop() {
   stream = null;
   $('#cam').hidden = true;
   $('#ok').hidden = true;
+  $('#mode').hidden = $('#band').hidden = true;
+  ocrMode = false;
   setMsg('');
   updateMain();
 }
@@ -757,6 +860,7 @@ $('#sheetOpts').onclick = e => { const o = e.target.closest('.opt'); if (o) setF
 $('#sheetClear').onclick = () => setField('');
 $('#sheetClose').onclick = () => $('#sheet').close();
 $('#sheet').onclick = e => { if (e.target === $('#sheet')) $('#sheet').close(); }; // tocar fuera cierra
+$('#mode').onclick = e => { const m = e.target.closest('button')?.dataset.m; if (m) setMode(m === 'label'); };
 $('#zoom').onclick = e => { const z = e.target.closest('button')?.dataset.z; if (z) setZoom(+z); };
 const tab = toList => {
   $('#back').toggleAttribute('aria-current', !toList);
