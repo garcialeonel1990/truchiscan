@@ -2,99 +2,285 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <title>Escáner</title>
 <style>
-  :root { color-scheme: light dark; --accent: #0a84ff; }
-  * { box-sizing: border-box; }
-  body { margin: 0 auto; max-width: 600px; padding: 40px 12px 12px; font: 16px -apple-system, system-ui, sans-serif; }
-  h1 { font-size: 20px; margin: 4px 0 12px; }
-  #cam { position: relative; height: 55vh; height: 55svh; background: #000; border-radius: 12px; overflow: hidden; }
-  #cam[hidden] { display: none; }
+  /* ===== Design tokens (contraste WCAG AA medido en claro y oscuro) ===== */
+  :root {
+    color-scheme: light dark;
+    --bg: #F2F2F7; --surface: #FFFFFF; --fill: #E5E5EA; --hair: #C6C6C8;
+    --text: #000000; --text2: #3C3C43; --text3: #6C6C70; --sep: #8E8E93;
+    --accent: #0058D0; --accent-text: #0058D0; --on-accent: #FFFFFF;
+    --danger: #C4001A; --danger-text: #C4001A; --ok: #1E7B34; --warn: #A35200; --warn-border: #C26100;
+    --r-ctl: 10px; --r-card: 14px; --r-btn: 20px; --r-sheet: 28px;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+    --tap: 48px; --tap-main: 56px; --tabs-h: 64px;
+    --dur: 180ms;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --material: color-mix(in srgb, var(--surface) 82%, transparent);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000; --surface: #1C1C1E; --fill: #2C2C2E; --hair: #38383A;
+      --text: #FFFFFF; --text2: #EBEBF5; --text3: #AEAEB2;
+      --accent: #0060DF; --accent-text: #4DA3FF;
+      --danger: #D70022; --danger-text: #FF6961; --ok: #32D74B; --warn: #FFB340; --warn-border: #FF9F0A;
+    }
+  }
+
+  /* ===== Base ===== */
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { background: var(--bg); }
+  body { margin: 0 auto; max-width: 600px; padding: calc(env(safe-area-inset-top) + var(--s2)) var(--s4) 0;
+    background: var(--bg); color: var(--text); font: 17px/1.35 -apple-system, system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
+  [hidden] { display: none !important; }
+  h1 { margin: var(--s2) 0 var(--s4); font: 700 28px/1.2 -apple-system, system-ui, sans-serif; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ic { width: 24px; height: 24px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  button { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 2px; }
+
+  /* ===== Escanear: cámara ===== */
+  #cam { position: relative; height: min(46svh, 420px); margin-bottom: var(--s4); background: #000; border-radius: var(--r-card); overflow: hidden; }
   #cam video { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); visibility: hidden; }
-  #ok { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: #000a; color: #30d158; font: 700 24px ui-monospace, monospace; text-align: center; word-break: break-all; }
-  #ok[hidden] { display: none; }
-  #zoom { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; gap: 6px; padding: 4px; border-radius: 22px; background: #0008; }
-  #zoom[hidden] { display: none; }
-  #zoom button { flex: none; width: 44px; height: 36px; padding: 0; border-radius: 18px; background: none; color: #fff; font: 600 14px system-ui; }
-  #zoom button.on { background: #fff3; color: #ffd60a; }
-  .bar { display: flex; justify-content: center; gap: 10px; margin: 12px 0; }
-  .bar[hidden] { display: none; }
-  button { flex: 1; max-width: 220px; padding: 22px; border: 0; border-radius: 14px; font: 600 19px system-ui; background: var(--accent); color: #fff; }
-  button.sec { background: #8884; color: inherit; }
-  #scan { max-width: 320px; padding: 28px; font-size: 23px; }
-  #msg { min-height: 1.3em; margin: 8px 0; text-align: center; color: #888; font-size: 14px; word-break: break-all; }
-  #card { margin: 12px 0; padding: 6px 14px; border-radius: 14px; background: #8882; }
-  .f { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
-  .f + .f { border-top: 1px solid #8883; }
-  .f b { width: 76px; color: #888; font: 600 14px system-ui; }
-  .f span { flex: 1; font: 600 20px ui-monospace, monospace; word-break: break-all; }
-  select { flex: 1; min-width: 0; padding: 10px; border: 1px solid #8886; border-radius: 10px; background: #8881; color: inherit; font: 600 17px system-ui; }
-  /* Ubicación a lo ancho; Estado y Tipo lado a lado */
-  .sels { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
-  .sels select { width: 100%; }
-  .sels select:first-child { grid-column: 1 / -1; }
-  li.miss { border-left: 4px solid #ff9f0a; padding-left: 8px; }
-  li.miss select[data-f=ubicacion] { border-color: #ff9f0a; }
-  button.mini { flex: none; padding: 10px 14px; font-size: 18px; border-radius: 10px; }
-  ol { padding-left: 2.5em; word-break: break-all; }
-  li { padding: 8px 0; border-bottom: 1px solid #8883; font-family: ui-monospace, monospace; }
-  li b { color: #888; font: 600 13px system-ui; }
-  button.danger { background: #ff453a; }
-  button:disabled { opacity: .4; }
-  #allrow { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #8883; font-weight: 600; }
-  #selbox[hidden] { display: none; }
-  /* Asignar en lote: misma ubicación y/o modelo a los seleccionados */
-  #bulk { margin: 12px 0; padding: 6px 14px 14px; border-radius: 14px; background: #8882; }
-  #bModelo { flex: 1; min-width: 0; padding: 10px; border: 1px solid #8886; border-radius: 10px; background: #8881; color: inherit; font: 600 17px system-ui; }
-  #apply { display: block; width: 100%; max-width: none; margin-top: 8px; padding: 16px; }
-  /* En modo selección el círculo reemplaza al número, así no se superponen */
-  ol.sel { list-style: none; padding-left: 0; }
-  li label { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
-  /* Selector redondo */
-  input[type=checkbox] { -webkit-appearance: none; appearance: none; flex: none; width: 26px; height: 26px; margin: 0; border: 2px solid #8889; border-radius: 50%; }
-  input[type=checkbox]:checked { border-color: var(--accent); background: radial-gradient(var(--accent) 0 45%, transparent 50%); }
+  .pill { position: absolute; z-index: 1; left: 50%; transform: translateX(-50%); margin: 0; padding: var(--s2) var(--s4); border-radius: 999px; background: #000000B3; color: #FFF; font: 600 16px system-ui; white-space: nowrap; }
+  #aim { top: var(--s3); }
+  #zoom { position: absolute; z-index: 1; left: 50%; bottom: var(--s3); transform: translateX(-50%); display: flex; gap: var(--s1); padding: var(--s1); border-radius: 999px; background: #000000B3; }
+  #zoom button { width: var(--tap); height: var(--tap); border-radius: 50%; color: #FFF; font: 600 16px system-ui; }
+  #zoom button.on { background: #FFFFFF33; color: #FFD60A; }
+  #ok { position: absolute; z-index: 2; inset: 0; display: flex; align-items: center; justify-content: center; padding: var(--s4); background: #000000CC; color: #32D74B; font: 700 24px var(--mono); text-align: center; word-break: break-all; }
+
+  /* ===== Escanear: ficha del equipo ===== */
+  .card { margin-bottom: var(--s4); padding: var(--s4); border-radius: var(--r-card); background: var(--surface); }
+  .card-h { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+  .card-h h2 { margin: 0; font: 600 20px system-ui; }
+  .meta { margin: var(--s1) 0 0; color: var(--text3); font-size: 16px; }
+  .chip { flex: none; padding: var(--s1) var(--s3); border-radius: 999px; background: var(--fill); color: var(--text); font: 600 16px system-ui; }
+  .chip.ok { color: var(--ok); }
+  .bar5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s1); margin: var(--s3) 0 var(--s2); }
+  .bar5 i { height: 6px; border-radius: 3px; background: var(--fill); transition: background var(--dur); }
+  .bar5 i.on { background: var(--accent-text); }
+  .bar5.done i { background: var(--ok); }
+  .row { display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: var(--tap-main); padding: var(--s2) 0; border-top: 1px solid var(--hair); text-align: left; }
+  .row .lbl { width: 92px; flex: none; color: var(--text3); font-size: 16px; }
+  .row .val { flex: 1; min-width: 0; font-size: 17px; word-break: break-all; }
+  .row .mono { font: 600 20px var(--mono); }
+  .row .val.empty { color: var(--text3); font: 400 17px system-ui; }
+  .row .ic { color: var(--text3); }
+  .row[data-f] .ic { color: var(--accent-text); }
+  .req { flex: none; padding: 2px var(--s2); border: 1px solid var(--warn-border); border-radius: 999px; color: var(--warn); font: 600 16px system-ui; }
+  .empty-state { padding: var(--s6) var(--s5); text-align: center; }
+  .empty-state > .ic { width: 48px; height: 48px; color: var(--accent-text); stroke-width: 1.6; }
+  .empty-state h2 { margin: var(--s3) 0 var(--s2); font: 600 20px system-ui; }
+  .empty-state p { margin: 0; color: var(--text2); }
+  .steps { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin: var(--s4) 0 0; padding: 0; list-style: none; counter-reset: s; }
+  .steps li { counter-increment: s; padding: var(--s1) var(--s3); border-radius: 999px; background: var(--fill); color: var(--text); font-size: 16px; }
+  .steps li::before { content: counter(s) " · "; color: var(--text2); }
+
+  /* ===== Acción principal fija abajo (zona del pulgar) ===== */
+  #home { padding-bottom: calc(var(--tabs-h) + 190px + env(safe-area-inset-bottom)); }
+  .dock { position: fixed; z-index: 5; left: 50%; bottom: calc(var(--tabs-h) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: 100%; max-width: 600px;
+    display: grid; gap: var(--s2); padding: var(--s5) var(--s4) var(--s3); background: linear-gradient(to bottom, transparent, var(--bg) var(--s5)); }
+  #msg { margin: 0; padding: var(--s3) var(--s4); border-radius: var(--r-ctl); background: var(--surface); color: var(--text2); font-size: 16px; text-align: center; overflow-wrap: anywhere; }
+  #msg.warn { color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn-border); }
+  .btn-main { display: flex; align-items: center; justify-content: center; gap: var(--s2); width: 100%; min-height: var(--tap-main); border-radius: var(--r-btn);
+    background: var(--accent); color: var(--on-accent); font: 600 19px system-ui; transition: transform var(--dur), background-color var(--dur); }
+  .btn-main:active { transform: scale(.98); }
+  .btn-main.alt { background: var(--fill); color: var(--text); }
+  .btn-text { min-height: var(--tap); border-radius: var(--r-ctl); color: var(--accent-text); font: 600 17px system-ui; }
+  .btn-sec { min-height: var(--tap-main); border-radius: var(--r-btn); background: var(--fill); color: var(--text); font: 600 17px system-ui; }
+
+  /* ===== Barra inferior ===== */
+  .tabs { position: fixed; z-index: 6; left: 50%; bottom: 0; transform: translateX(-50%); width: 100%; max-width: 600px; display: grid; grid-template-columns: 1fr 1fr;
+    padding: var(--s1) var(--s2) env(safe-area-inset-bottom); background: var(--material); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border-top: 1px solid var(--hair); }
+  .tabs button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: var(--text3); font: 600 16px system-ui; }
+  .tabs button[aria-current="page"] { color: var(--accent-text); }
+
+  /* ===== Hoja inferior de opciones ===== */
+  #sheet, #edit { width: 100%; max-width: 600px; max-height: 85svh; margin: auto auto 0; padding: 0; border: 0; border-radius: var(--r-sheet) var(--r-sheet) 0 0; background: var(--surface); color: var(--text); }
+  #sheet::backdrop, #edit::backdrop { background: #00000080; }
+  #sheet[open], #edit[open] { animation: up var(--dur) ease-out; }
+  @keyframes up { from { transform: translateY(24px); opacity: .6; } }
+  .sheet-in { display: flex; flex-direction: column; max-height: 85svh; padding: var(--s2) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom)); }
+  .grab { flex: none; width: 36px; height: 5px; margin: 0 auto var(--s3); border-radius: 3px; background: var(--sep); }
+  .sheet-in h2 { margin: 0 0 var(--s2); font: 600 20px system-ui; text-align: center; }
+  #sheetOpts { overflow-y: auto; overscroll-behavior: contain; }
+  .opt { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); width: 100%; min-height: var(--tap-main); padding: 0 var(--s2); border-bottom: 1px solid var(--hair); font-size: 17px; text-align: left; }
+  .opt .ic { color: var(--accent-text); visibility: hidden; }
+  .opt[aria-pressed="true"] { font-weight: 600; }
+  .opt[aria-pressed="true"] .ic { visibility: visible; }
+  .sheet-acts { flex: none; display: grid; gap: var(--s2); margin-top: var(--s3); }
+  .btn-text.danger { color: var(--danger-text); }
+
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+  /* ===== Lista ===== */
+  #panel { padding-bottom: calc(var(--tabs-h) + 110px + env(safe-area-inset-bottom)); }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: var(--tap); margin: var(--s2) 0 var(--s1); }
+  .head h1 { margin: 0; }
+  .head .btn-text { padding: 0 var(--s2); }
+  .summary { margin: 0 0 var(--s4); color: var(--text2); font-size: 16px; }
+  .summary b { color: var(--warn); font-weight: 600; }
+  .group { margin: 0; padding: 0; list-style: none; border-radius: var(--r-card); background: var(--surface); overflow: hidden; }
+  .item { display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: 72px; padding: var(--s3) var(--s4); text-align: left; transition: background-color var(--dur); }
+  .item:active { background: color-mix(in srgb, var(--text) 6%, var(--surface)); }
+  .group li + li .item { box-shadow: inset 0 1px 0 var(--hair); }
+  .item .tx { flex: 1; min-width: 0; }
+  .item .l1 { display: flex; align-items: baseline; gap: var(--s2); }
+  .item .code { font: 600 18px var(--mono); overflow-wrap: anywhere; }
+  .item .ser { margin-top: 2px; color: var(--text2); font: 400 16px var(--mono); overflow-wrap: anywhere; }
+  .item .l3 { margin-top: 2px; color: var(--text3); font-size: 16px; }
+  .item .l3.miss { color: var(--warn); font-weight: 600; }
+  .item > .ic { color: var(--text3); }
+  /* Estado del registro: anillo vacío, 1-4 de 5 o completo */
+  .ring { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; font: 700 14px system-ui; }
+  .ring.st0 { box-shadow: inset 0 0 0 2px var(--sep); }
+  .ring.st1 { box-shadow: inset 0 0 0 2px var(--warn); color: var(--warn); }
+  .ring.st2 { background: var(--ok); color: var(--surface); }
+  .ring.st2 .ic { width: 18px; height: 18px; stroke-width: 3; }
+  /* Selección */
+  .item[aria-checked="true"] { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+  .chk { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--sep); color: #FFF; }
+  .chk .ic { width: 18px; height: 18px; stroke-width: 3; visibility: hidden; }
+  [aria-checked="true"] > .chk { background: var(--accent); box-shadow: none; }
+  [aria-checked="true"] > .chk .ic { visibility: visible; }
+  .empty-list { padding: var(--s6) var(--s5); border-radius: var(--r-card); background: var(--surface); text-align: center; }
+  .empty-list .ic { width: 48px; height: 48px; color: var(--text3); stroke-width: 1.6; }
+  .empty-list h2 { margin: var(--s3) 0 var(--s2); font: 600 20px system-ui; }
+  .empty-list p { margin: 0; color: var(--text2); }
+  /* Barra de acciones de la lista (encima de la barra inferior) */
+  .acts { display: grid; grid-template-columns: 1fr auto; gap: var(--s2); }
+  .acts .btn-sec { padding: 0 var(--s4); }
+  .acts .del { color: var(--danger-text); }
+  .acts .del .ic { margin-right: var(--s1); }
+  .btn-main:disabled { background: var(--fill); color: var(--text3); cursor: default; transform: none; }
+  .btn-sec:disabled { opacity: .5; cursor: default; }
+  .hint { margin: 0; color: var(--text3); font-size: 16px; text-align: center; }
+
+  /* ===== Hoja de edición y asignación en lote ===== */
+  .fields { overflow-y: auto; overscroll-behavior: contain; }
+  .sub { margin: 0 0 var(--s3); color: var(--text3); font-size: 16px; text-align: center; }
+  .field { margin-bottom: var(--s3); }
+  .field-h { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-height: var(--tap); }
+  .field-h label, .field-h .lab { color: var(--text2); font: 600 16px system-ui; }
+  .field-h .btn-text { padding: 0 var(--s2); }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .chips button { min-height: var(--tap); padding: 0 var(--s4); border-radius: 999px; box-shadow: inset 0 0 0 1px var(--sep); font-size: 17px; }
+  .chips button[aria-pressed="true"] { background: var(--accent); box-shadow: none; color: var(--on-accent); font-weight: 600; }
+  .input { width: 100%; min-height: var(--tap-main); padding: 0 var(--s4); border: 1px solid var(--sep); border-radius: var(--r-ctl); background: var(--bg); color: var(--text); font: 17px system-ui; }
+  .input:focus { outline: 3px solid var(--accent-text); outline-offset: 1px; }
+  .ro { display: flex; justify-content: space-between; gap: var(--s3); min-height: var(--tap); align-items: center; border-bottom: 1px solid var(--hair); }
+  .ro span:first-child { color: var(--text3); font-size: 16px; }
+  .ro span:last-child { font: 600 17px var(--mono); overflow-wrap: anywhere; text-align: right; }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10.5 8v8M14 8v8M17 8v8"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+</svg>
+
 <main id="home">
-  <h1>Escáner de códigos</h1>
+  <h1>Escanear</h1>
   <div id="cam" hidden>
-    <div id="zoom" hidden><button data-z="1">1x</button><button data-z="2">2x</button><button data-z="3">3x</button></div>
-    <div id="ok" hidden></div></div>
-  <div class="bar"><button id="scan">📷 Escanear</button></div>
-  <div id="msg"></div>
-  <div id="card" hidden>
-    <div class="f"><b>Tag</b><span id="tag"></span><button class="mini" data-f="tag" aria-label="Escanear tag">📷</button></div>
-    <div class="f"><b>Serial</b><span id="serial"></span><button class="mini" data-f="serial" aria-label="Escanear serial">📷</button></div>
-    <div class="f"><b>Ubicación</b><select id="ubic"></select></div>
+    <p id="aim" class="pill"></p>
+    <div id="zoom" role="group" aria-label="Zoom" hidden><button data-z="1" aria-label="Zoom 1x">1x</button><button data-z="2" aria-label="Zoom 2x">2x</button><button data-z="3" aria-label="Zoom 3x">3x</button></div>
+    <div id="ok" role="status" hidden></div>
   </div>
-  <div class="bar"><button id="open" class="sec">📋 Ver lista (<span id="count">0</span>)</button></div>
+
+  <section id="empty" class="card empty-state">
+    <svg class="ic" aria-hidden="true"><use href="#i-scan"/></svg>
+    <h2>Empezá por el Tag</h2>
+    <p>Tocá <b>Escanear Tag</b> y apuntá al código del equipo.</p>
+    <ol class="steps"><li>Tag</li><li>Serial</li><li>Ubicación, estado y tipo</li></ol>
+  </section>
+
+  <section id="card" class="card" aria-labelledby="cardTitle" hidden>
+    <div class="card-h"><h2 id="cardTitle">Equipo</h2><span id="prog" class="chip"></span></div>
+    <p id="cardDate" class="meta"></p>
+    <div id="bar5" class="bar5" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    <button class="row" data-f="tag"><span class="lbl">Tag</span><span id="tag" class="val mono"></span><span class="sr">Escanear Tag</span><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg></button>
+    <button class="row" data-f="serial"><span class="lbl">Serial</span><span id="serial" class="val mono"></span><span class="sr">Escanear Serial</span><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg></button>
+    <button class="row" data-pick="ubicacion"><span class="lbl">Ubicación</span><span id="v-ubicacion" class="val"></span><span id="reqU" class="req">Obligatoria</span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
+    <button class="row" data-pick="estado"><span class="lbl">Estado</span><span id="v-estado" class="val"></span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
+    <button class="row" data-pick="tipo"><span class="lbl">Tipo</span><span id="v-tipo" class="val"></span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
+  </section>
+
+  <div class="dock">
+    <p id="msg" role="status" aria-live="polite" hidden></p>
+    <button id="skip" class="btn-text" hidden>Sin serial · escanear otro equipo</button>
+    <button id="scan" class="btn-main"></button>
+  </div>
 </main>
 
 <section id="panel" hidden>
-  <div class="bar"><button id="back" class="sec">← Volver</button></div>
-  <div class="bar" id="acts">
-    <button id="csv">📤 Exportar CSV</button>
-    <button id="pick" class="sec">☑ Seleccionar</button>
+  <div class="head">
+    <h1>Lista</h1>
+    <button id="pick" class="btn-text">Seleccionar</button>
+    <button id="cancel" class="btn-text" hidden>Cancelar</button>
   </div>
-  <div id="selbox" hidden>
-    <div id="bulk">
-      <div class="f"><b>Ubicación</b><select data-b="ubicacion"></select></div>
-      <div class="f"><b>Estado</b><select data-b="estado"></select></div>
-      <div class="f"><b>Tipo</b><select data-b="tipo"></select></div>
-      <div class="f"><b>Modelo</b><input id="bModelo" list="modelos" placeholder="No cambiar" autocomplete="off"></div>
-      <datalist id="modelos"></datalist>
-      <button id="apply">✓ Asignar a <span id="n2">0</span></button>
-    </div>
-    <div class="bar">
-      <button id="del" class="danger">🗑 Borrar (<span id="n">0</span>)</button>
-      <button id="cancel" class="sec">Cancelar</button>
-    </div>
-    <label id="allrow"><input type="checkbox" id="all"> Seleccionar todos</label>
+  <p id="summary" class="summary" aria-live="polite"></p>
+  <div id="emptyList" class="empty-list" hidden>
+    <svg class="ic" aria-hidden="true"><use href="#i-list"/></svg>
+    <h2>Todavía no hay equipos</h2>
+    <p>Los equipos que escanees aparecen acá.</p>
   </div>
-  <ol id="list" reversed></ol>
+  <button id="all" class="item" role="checkbox" aria-checked="false" hidden style="margin-bottom:var(--s2);border-radius:var(--r-card);background:var(--surface)">
+    <span class="chk"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span><span class="tx">Seleccionar todos</span>
+  </button>
+  <ol id="list" class="group" reversed></ol>
+
+  <div class="dock">
+    <div id="acts" class="acts">
+      <button id="csv" class="btn-main"><svg class="ic" aria-hidden="true"><use href="#i-share"/></svg>Exportar CSV</button>
+    </div>
+    <div id="selbox" hidden>
+      <p id="selHint" class="hint" hidden>Tocá los equipos para marcarlos</p>
+      <div class="acts">
+        <button id="bulkOpen" class="btn-main">Asignar a <span id="n2">0</span></button>
+        <button id="del" class="btn-sec del" aria-label="Borrar seleccionados"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span id="n">0</span></button>
+      </div>
+    </div>
+  </div>
 </section>
+
+<dialog id="edit" aria-labelledby="editTitle">
+  <div class="sheet-in">
+    <div class="grab" aria-hidden="true"></div>
+    <h2 id="editTitle"></h2>
+    <p id="editSub" class="sub"></p>
+    <div id="bulk" class="fields"></div>
+    <div class="sheet-acts">
+      <button id="apply" class="btn-main"></button>
+      <button id="editClose" class="btn-sec">Cancelar</button>
+    </div>
+  </div>
+</dialog>
+
+<nav class="tabs" aria-label="Secciones">
+  <button id="back" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-scan"/></svg>Escanear</button>
+  <button id="open"><svg class="ic" aria-hidden="true"><use href="#i-list"/></svg><span>Lista (<span id="count">0</span>)</span></button>
+</nav>
+
+<dialog id="sheet" aria-labelledby="sheetTitle">
+  <div class="sheet-in">
+    <div class="grab" aria-hidden="true"></div>
+    <h2 id="sheetTitle"></h2>
+    <div id="sheetOpts"></div>
+    <div class="sheet-acts">
+      <button id="sheetClear" class="btn-text danger">Quitar selección</button>
+      <button id="sheetClose" class="btn-sec">Cancelar</button>
+    </div>
+  </div>
+</dialog>
 
 <script type="module">
 const POLYFILL = 'https://fastly.jsdelivr.net/npm/barcode-detector@2/dist/es/pure.min.js';
@@ -115,8 +301,6 @@ const FIELDS = {
   estado: { label: 'estado', opts: ['Rotos', 'En reparación', 'Libres', 'Asignados'] },
   tipo: { label: 'tipo', opts: ['Otro', 'Equipo de red', 'Impresora', 'Dock / Adaptador', 'Cargador', 'Auriculares', 'Mouse', 'Teclado', 'Tablet', 'iPad', 'Celular Android', 'iPhone', 'Monitor', 'PC de escritorio', 'Notebook'] },
 };
-const opts = (f, v, first = `Elegí ${FIELDS[f].label}…`) =>
-  `<option value="">${first}</option>` + FIELDS[f].opts.map(o => `<option${o === v ? ' selected' : ''}>${o}</option>`).join('');
 // Ubicaciones de la versión anterior: los depósitos pasan a la ubicación nueva; Reparar y Asignada pasan a Estado
 const OLD = { 'Depósito 1ro': ['ubicacion', 'Piso 1 Depósito'], 'Depósito 5to': ['ubicacion', 'Piso 5 Depósito'],
   'Reparar': ['estado', 'En reparación'], 'Asignada': ['estado', 'Asignados'] };
@@ -127,29 +311,153 @@ for (const r of rows) {
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Lista: filas compactas con el estado de cada registro (vacío / incompleto / completo)
+const filled = r => [r.tag, r.serial, r.ubicacion, r.estado, r.tipo].filter(Boolean).length;
+function rowHTML(r, i) {
+  const n = filled(r);
+  const ring = sel
+    ? `<span class="chk"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>`
+    : n === 5 ? `<span class="ring st2" aria-hidden="true"><svg class="ic"><use href="#i-check"/></svg></span>`
+    : `<span class="ring ${n ? 'st1' : 'st0'}" aria-hidden="true">${n || ''}</span>`;
+  const extra = [r.tipo, r.modelo, r.estado].filter(Boolean).join(' · ');
+  const l3 = r.ubicacion ? [r.ubicacion, extra].filter(Boolean).join(' · ') : 'Falta ubicación' + (extra ? ' · ' + extra : '');
+  const state = n === 5 ? 'completo' : `${n} de 5`;
+  const attrs = sel
+    ? `role="checkbox" aria-checked="${sel.has(i)}"`
+    : `aria-label="Equipo ${i + 1}, Tag ${esc(r.tag || 'sin tag')}, ${state}${r.ubicacion ? '' : ', falta ubicación'}. Editar"`;
+  return `<li><button class="item" data-i="${i}" ${attrs}>${ring}<span class="tx">` +
+    `<span class="l1"><span class="code">${esc(r.tag || 'Sin tag')}</span></span>` +
+    `<span class="ser" style="display:block">${r.serial ? esc(r.serial) : 'Sin serial'}</span>` +
+    `<span class="l3${r.ubicacion ? '' : ' miss'}" style="display:block">${esc(l3)}</span>` +
+    `</span>${sel ? '' : '<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg>'}</button></li>`;
+}
+
+// Hoja de edición: un registro (valores actuales) o varios (asignar en lote, "No cambiar" por defecto)
+let editing = [];
+function openEdit(idx) {
+  editing = idx;
+  const one = idx.length === 1, r = one ? rows[idx[0]] : {};
+  $('#editTitle').textContent = one ? `Equipo ${idx[0] + 1}` : `Asignar a ${idx.length} equipos`;
+  $('#editSub').textContent = one ? '' : 'Solo se cambia lo que elijas';
+  $('#editSub').hidden = one;
+  const field = f => `<div class="field" data-k="${f}"><div class="field-h"><span class="lab" id="lab-${f}">${{ ubicacion: 'Ubicación', estado: 'Estado', tipo: 'Tipo' }[f]}</span>` +
+    `<span class="lab" style="font-weight:400;color:var(--text3)">${one ? '' : 'No cambiar'}</span></div>` +
+    `<div class="chips" role="group" aria-labelledby="lab-${f}">` +
+    FIELDS[f].opts.map(o => `<button data-v="${esc(o)}" aria-pressed="${r[f] === o}">${esc(o)}</button>`).join('') + '</div></div>';
+  const modelos = [...new Set(rows.map(x => x.modelo).filter(Boolean))];
+  $('#bulk').innerHTML = (one ? `<div class="ro"><span>Tag</span><span>${esc(r.tag || '—')}</span></div>` +
+      `<div class="ro" style="margin-bottom:var(--s3)"><span>Serial</span><span>${esc(r.serial || '—')}</span></div>` : '') +
+    Object.keys(FIELDS).map(field).join('') +
+    `<div class="field"><div class="field-h"><label for="bModelo">Modelo</label></div>` +
+    `<input id="bModelo" class="input" list="modelos" autocomplete="off" enterkeyhint="done" placeholder="${one ? 'Escribí el modelo' : 'No cambiar'}" value="${esc(r.modelo || '')}">` +
+    `<datalist id="modelos">${modelos.map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>`;
+  canApply();
+  $('#edit').showModal();
+}
+// Valores elegidos en la hoja: { ubicacion, estado, tipo, modelo }
+function editVals() {
+  const v = {};
+  $('#bulk').querySelectorAll('.field[data-k]').forEach(d => { v[d.dataset.k] = d.querySelector('[aria-pressed="true"]')?.dataset.v || ''; });
+  v.modelo = $('#bModelo').value.trim();
+  return v;
+}
+function canApply() {
+  const one = editing.length === 1, v = editVals();
+  const any = Object.values(v).some(Boolean);
+  $('#apply').disabled = !one && !any;
+  $('#apply').textContent = one ? 'Guardar' : any ? `Asignar a ${editing.length}` : 'Elegí al menos un valor';
+}
+
 function render() {
-  list.innerHTML = rows.map((r, i) => {
-    const txt = `<span><b>Tag</b> ${esc(r.tag || '—')}<br><b>Serial</b> ${esc(r.serial || '—')}` +
-      (r.modelo ? `<br><b>Modelo</b> ${esc(r.modelo)}` : '') + '</span>';
-    return sel
-      ? `<li><label><input type="checkbox" data-i="${i}"${sel.has(i) ? ' checked' : ''}>${txt}</label></li>`
-      : `<li${r.ubicacion ? '' : ' class="miss"'}>${txt}<div class="sels">` +
-        Object.keys(FIELDS).map(f => `<select data-f="${f}" data-r="${i}">${opts(f, r[f])}</select>`).join('') + '</div></li>';
-  }).reverse().join('');
-  list.classList.toggle('sel', !!sel);
+  list.innerHTML = rows.map(rowHTML).reverse().join('');
+  list.hidden = !rows.length;
+  $('#emptyList').hidden = !!rows.length;
+  // Resumen arriba: cuántos hay y cuántos no se pueden exportar todavía
+  const faltan = rows.filter(r => !r.ubicacion).length, comp = rows.filter(r => filled(r) === 5).length;
+  $('#summary').innerHTML = !rows.length ? '' : sel
+    ? `${sel.size} de ${rows.length} seleccionados`
+    : `${rows.length} equipo${rows.length > 1 ? 's' : ''} · ${comp} completo${comp === 1 ? '' : 's'}` + (faltan ? ` · <b>${faltan} sin ubicación</b>` : '');
+  $('#pick').hidden = !!sel || !rows.length;
+  $('#cancel').hidden = !sel;
+  $('#all').hidden = !sel;
   $('#acts').hidden = !!sel;
   $('#selbox').hidden = !sel;
+  $('#csv').disabled = !rows.length;
   if (sel) {
     $('#n').textContent = $('#n2').textContent = sel.size;
-    $('#del').disabled = !sel.size;
-    $('#all').checked = sel.size === rows.length;
-    canApply();
+    $('#del').disabled = $('#bulkOpen').disabled = !sel.size;
+    $('#selHint').hidden = !!sel.size;
+    $('#all').setAttribute('aria-checked', sel.size === rows.length);
   }
   $('#count').textContent = rows.length;
-  const r = rows[cur];
-  $('#card').hidden = !r;
-  if (r) { $('#tag').textContent = r.tag || '—'; $('#serial').textContent = r.serial || '—'; $('#ubic').innerHTML = opts('ubicacion', r.ubicacion); }
+  renderCard();
   localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
+}
+
+// ===== Escanear: ficha del registro actual y botón principal según el paso =====
+const svg = id => `<svg class="ic" aria-hidden="true"><use href="#i-${id}"/></svg>`;
+const STEP = { tag: 'Tag', serial: 'Serial' };
+// Qué falta escanear: Tag → Serial → listo (siguiente equipo)
+const nextScan = r => !r ? 'new' : !r.tag ? 'tag' : !r.serial ? 'serial' : 'new';
+
+function renderCard() {
+  const r = rows[cur];
+  $('#empty').hidden = !!r;
+  $('#card').hidden = !r;
+  if (r) {
+    const done = [r.tag, r.serial, r.ubicacion, r.estado, r.tipo].map(Boolean);
+    const n = done.filter(Boolean).length;
+    $('#cardTitle').textContent = `Equipo ${cur + 1} de ${rows.length}`;
+    $('#cardDate').textContent = r.date ? 'Escaneado ' + r.date : '';
+    $('#prog').textContent = n === 5 ? '✓ Completo' : `${n} de 5`;
+    $('#prog').classList.toggle('ok', n === 5);
+    [...$('#bar5').children].forEach((b, i) => b.classList.toggle('on', done[i]));
+    $('#bar5').classList.toggle('done', n === 5);
+    for (const f of ['tag', 'serial']) {
+      $('#' + f).textContent = r[f] || 'Tocá para escanear';
+      $('#' + f).classList.toggle('empty', !r[f]);
+    }
+    for (const f of Object.keys(FIELDS)) {
+      $('#v-' + f).textContent = r[f] || `Elegí ${FIELDS[f].label}`;
+      $('#v-' + f).classList.toggle('empty', !r[f]);
+    }
+    $('#reqU').hidden = !!r.ubicacion;
+  }
+  updateMain();
+}
+
+function updateMain() {
+  const live = !!stream || busy;
+  const t = nextScan(rows[cur]);
+  btn.classList.toggle('alt', live);
+  btn.innerHTML = live ? svg('stop') + 'Detener'
+    : svg('scan') + (t === 'serial' ? 'Escanear Serial' : t === 'tag' ? 'Escanear Tag' : rows[cur] ? 'Escanear siguiente equipo' : 'Escanear Tag');
+  $('#skip').hidden = live || t !== 'serial';
+}
+
+function setMsg(text) {
+  msg.textContent = text;
+  msg.hidden = !text;
+  msg.classList.toggle('warn', /^(Ya está|Error)/.test(text));
+}
+
+// ===== Hoja inferior: elegir Ubicación / Estado / Tipo del registro actual =====
+let sheetField = null;
+function openSheet(f) {
+  const r = rows[cur];
+  if (!r) return;
+  sheetField = f;
+  $('#sheetTitle').textContent = { ubicacion: 'Ubicación', estado: 'Estado', tipo: 'Tipo' }[f];
+  $('#sheetOpts').innerHTML = FIELDS[f].opts.map(o =>
+    `<button class="opt" data-v="${esc(o)}" aria-pressed="${r[f] === o}"><span>${esc(o)}</span>${svg('check')}</button>`).join('');
+  $('#sheetClear').hidden = !r[f];
+  $('#sheet').showModal();
+  ($('#sheetOpts [aria-pressed="true"]') || $('#sheetOpts .opt'))?.focus();
+}
+function setField(v) {
+  rows[cur][sheetField] = v;
+  $('#sheet').close();
+  render();
 }
 
 function beep() {
@@ -197,32 +505,63 @@ async function loop(s) {
           ok.style.color = warn ? '#ff9f0a' : '';
           ok.hidden = false;
           await new Promise(r => setTimeout(r, 1200));
-          if (stream === s) { stop(); msg.textContent = warn; }
+          if (stream === s) { stop(); setMsg(warn); }
           return;
         }
       }
-    } catch (e) { msg.textContent = 'Error de lectura: ' + e.message; }
+    } catch (e) { setMsg('Error de lectura: ' + e.message); }
     await new Promise(r => setTimeout(r, 150));
   }
 }
 
 let busy = false; // evita abrir dos cámaras si se toca dos veces
+const SIZE = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+const ANDROID = /Android/i.test(navigator.userAgent);
+// Cada pedido va en su propio grupo "advanced": si el celular no soporta uno (p. ej. enfoque), el zoom igual se aplica.
+// El enfoque continuo se pide solo en Android: muchos (Samsung) quedan con foco fijo si la página no lo pide.
+const want = zoom => ({ ...SIZE, advanced: [{ zoom }, ...(ANDROID ? [{ focusMode: 'continuous' }] : [])] });
+const autofocus = s => s.getVideoTracks()[0].getCapabilities?.().focusMode?.includes('continuous');
+
+async function openCam(zoom) {
+  const get = id => navigator.mediaDevices.getUserMedia({
+    audio: false, video: { ...(id ? { deviceId: { exact: id } } : { facingMode: 'environment' }), ...want(zoom) }
+  });
+  if (!ANDROID) return get(); // iPhone: sin cambios
+  const saved = localStorage.getItem('camAF');
+  let s;
+  try { s = await get(saved); } catch (e) { if (!saved) throw e; localStorage.removeItem('camAF'); s = await get(); }
+  if (autofocus(s)) return s;
+  // La cámara que eligió Chrome no enfoca (en el S22, la ultra gran angular tiene foco fijo):
+  // prueba las otras cámaras traseras y recuerda la primera con enfoque automático
+  const cur = s.getVideoTracks()[0].getSettings().deviceId;
+  const cams = (await navigator.mediaDevices.enumerateDevices())
+    .filter(d => d.kind === 'videoinput' && d.deviceId !== cur && /back|rear|trasera|environment/i.test(d.label));
+  s.getTracks().forEach(t => t.stop()); // Android abre una cámara por vez
+  for (const d of cams) {
+    try {
+      const t = await get(d.deviceId);
+      if (autofocus(t)) { localStorage.setItem('camAF', d.deviceId); return t; }
+      t.getTracks().forEach(x => x.stop());
+    } catch {}
+  }
+  localStorage.removeItem('camAF');
+  return get(); // ninguna enfoca sola: vuelve a la de siempre
+}
+
 async function start(t) {
   if (busy) return;
   busy = true;
   stop();
   target = t;
+  updateMain();
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('la cámara requiere abrir la página con https://');
     audio ??= new AudioContext(); // se crea tras un toque (requisito de iOS)
-    msg.textContent = 'Abriendo cámara…';
+    setMsg('Abriendo cámara…');
     await getDetector();
-    const SIZE = { width: { ideal: 1920 }, height: { ideal: 1080 } }, zoom = +localStorage.getItem('zoom') || 1;
+    const zoom = +localStorage.getItem('zoom') || 1;
     // El zoom se pide al abrir: cambiarlo después en Safari puede bajar la resolución y dejar la imagen vertical
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: 'environment', ...SIZE, advanced: [{ zoom }] }
-    });
+    stream = await openCam(zoom);
     video = document.createElement('video');
     video.muted = video.playsInline = video.autoplay = true;
     video.setAttribute('playsinline', '');
@@ -233,14 +572,15 @@ async function start(t) {
     await video.play();
     fit();
     setupZoom();
-    btn.textContent = '⏹ Detener';
-    msg.textContent = `Apuntá al ${t === 'serial' ? 'Serial' : 'Tag'}`;
+    $('#aim').textContent = `Apuntá al ${STEP[t] || 'Tag'}`;
+    setMsg('');
     loop(stream);
   } catch (e) {
     stop();
-    msg.textContent = 'Error: ' + e.message;
+    setMsg('Error: ' + e.message);
   } finally {
     busy = false;
+    updateMain();
   }
 }
 
@@ -274,8 +614,8 @@ async function setZoom(v) {
   if (!z) return;
   v = Math.min(Math.max(v, z.min), z.max);
   try {
-    // Se repite la resolución para que Safari no la cambie al aplicar el zoom
-    await track.applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ zoom: v }] });
+    // Se repite resolución (y enfoque en Android): applyConstraints reemplaza todo lo pedido antes
+    await track.applyConstraints(want(v));
     localStorage.setItem('zoom', v);
     mark(v);
   } catch {}
@@ -287,8 +627,8 @@ function stop() {
   stream = null;
   $('#cam').hidden = true;
   $('#ok').hidden = true;
-  btn.textContent = '📷 Escanear';
-  msg.textContent = '';
+  setMsg('');
+  updateMain();
 }
 
 // Mismas columnas y en el mismo orden que "Inventario IT - Planilla para importar.xlsx".
@@ -322,50 +662,68 @@ async function exportCSV() {
   }
 }
 
-btn.onclick = () => stream ? stop() : start('new');
-$('#card').onclick = e => { const f = e.target.closest('.mini')?.dataset.f; if (f) start(f); };
-$('#zoom').onclick = e => { const z = e.target.closest('button')?.dataset.z; if (z) setZoom(+z); };
-$('#open').onclick = () => { stop(); home.hidden = true; panel.hidden = false; };
-$('#back').onclick = () => { sel = null; render(); panel.hidden = true; home.hidden = false; };
-$('#csv').onclick = exportCSV;
-// Ubicación desde la ficha (registro actual); en la lista, Ubicación / Estado / Tipo de cada registro
-$('#ubic').onchange = e => { rows[cur].ubicacion = e.target.value; render(); };
-list.addEventListener('change', e => {
-  const { f, r } = e.target.dataset;
-  if (f) { rows[+r][f] = e.target.value; render(); }
-});
-// Seleccionar: marca uno, varios o todos para asignarles los mismos valores o borrarlos
-const bulk = () => [...document.querySelectorAll('[data-b]')];
-$('#pick').onclick = () => {
-  if (!rows.length) return alert('No hay registros');
-  sel = new Set();
-  bulk().forEach(s => s.innerHTML = opts(s.dataset.b, '', 'No cambiar'));
-  $('#bModelo').value = '';
-  // Sugiere los modelos ya cargados para escribirlos igual en todos
-  $('#modelos').innerHTML = [...new Set(rows.map(r => r.modelo).filter(Boolean))].map(m => `<option value="${esc(m)}">`).join('');
-  render();
+// El botón principal hace el paso que falta: Tag → Serial → siguiente equipo
+btn.onclick = () => stream ? stop() : start(nextScan(rows[cur]));
+$('#skip').onclick = () => start('new');
+$('#card').onclick = e => {
+  const b = e.target.closest('button');
+  if (b?.dataset.f) start(b.dataset.f);
+  else if (b?.dataset.pick) openSheet(b.dataset.pick);
 };
-function canApply() {
-  $('#apply').disabled = !sel?.size || !(bulk().some(s => s.value) || $('#bModelo').value.trim());
-}
-$('#bulk').onchange = $('#bulk').oninput = canApply;
+$('#sheetOpts').onclick = e => { const o = e.target.closest('.opt'); if (o) setField(o.dataset.v); };
+$('#sheetClear').onclick = () => setField('');
+$('#sheetClose').onclick = () => $('#sheet').close();
+$('#sheet').onclick = e => { if (e.target === $('#sheet')) $('#sheet').close(); }; // tocar fuera cierra
+$('#zoom').onclick = e => { const z = e.target.closest('button')?.dataset.z; if (z) setZoom(+z); };
+const tab = toList => {
+  $('#back').toggleAttribute('aria-current', !toList);
+  $('#open').toggleAttribute('aria-current', toList);
+  $(toList ? '#open' : '#back').setAttribute('aria-current', 'page');
+};
+$('#open').onclick = () => { stop(); home.hidden = true; panel.hidden = false; tab(true); scrollTo(0, 0); };
+$('#back').onclick = () => { sel = null; render(); panel.hidden = true; home.hidden = false; tab(false); scrollTo(0, 0); };
+$('#csv').onclick = exportCSV;
+// Lista: tocar un registro lo abre para editar; en modo selección lo marca o desmarca
+list.onclick = e => {
+  const b = e.target.closest('.item');
+  if (!b) return;
+  const i = +b.dataset.i;
+  if (sel) { sel.has(i) ? sel.delete(i) : sel.add(i); render(); }
+  else openEdit([i]);
+};
+// Seleccionar: marca uno, varios o todos para asignarles los mismos valores o borrarlos
+$('#pick').onclick = () => { if (rows.length) { sel = new Set(); render(); } };
+$('#bulkOpen').onclick = () => { if (sel?.size) openEdit([...sel]); };
+$('#editClose').onclick = () => $('#edit').close();
+$('#edit').onclick = e => { if (e.target === $('#edit')) $('#edit').close(); }; // tocar fuera cierra
+// Botones de opciones: tocar elige, tocar de nuevo vuelve a "No cambiar" / vacío
+$('#bulk').onclick = e => {
+  const c = e.target.closest('.chips button');
+  if (!c) return;
+  const on = c.getAttribute('aria-pressed') === 'true';
+  c.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', 'false'));
+  if (!on) c.setAttribute('aria-pressed', 'true');
+  canApply();
+};
+$('#bulk').oninput = canApply;
 $('#apply').onclick = () => {
-  // Solo se aplican los campos elegidos; los que quedan en "No cambiar" no se tocan
-  const vals = Object.fromEntries(bulk().filter(s => s.value).map(s => [s.dataset.b, s.value]));
-  const m = $('#bModelo').value.trim();
-  if (m) vals.modelo = m;
-  sel.forEach(i => Object.assign(rows[i], vals));
-  sel = null;
+  if (!editing.length) return;
+  const vals = editVals();
+  if (editing.length === 1) {
+    // Un registro: se guarda lo que cambió en la hoja (vacío = sin valor); lo que no cambió no se toca
+    const r = rows[editing[0]];
+    for (const [k, v] of Object.entries(vals)) if (v !== (r[k] || '')) r[k] = v;
+  } else {
+    // Varios: solo se aplican los campos elegidos; los que quedan en "No cambiar" no se tocan
+    for (const k of Object.keys(vals)) if (!vals[k]) delete vals[k];
+    sel.forEach(i => Object.assign(rows[i], vals));
+    sel = null;
+  }
+  $('#edit').close();
   render();
 };
 $('#cancel').onclick = () => { sel = null; render(); };
-$('#all').onchange = e => { sel = new Set(e.target.checked ? rows.keys() : []); render(); };
-list.onchange = e => {
-  const i = e.target.dataset.i;
-  if (i == null) return;
-  e.target.checked ? sel.add(+i) : sel.delete(+i);
-  render();
-};
+$('#all').onclick = () => { sel = new Set(sel.size === rows.length ? [] : rows.keys()); render(); };
 $('#del').onclick = () => {
   const n = sel.size;
   if (!n || !confirm(`¿Borrar ${n} registro${n > 1 ? 's' : ''}?`)) return;
