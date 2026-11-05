@@ -52,13 +52,15 @@
     border-radius: 999px; background: #000000B3; }
   #mode button { min-height: var(--tap); padding: 0 var(--s4); border-radius: 999px; color: #FFF; font: 600 16px system-ui; white-space: nowrap; }
   #mode button[aria-pressed="true"] { background: #FFF; color: #000; }
-  #mode:not([hidden]) + #aim { top: 72px; }
   #mode, #aim, #zoom { z-index: 2; }
-  #band { position: absolute; z-index: 1; left: 5%; right: 5%; top: 52%; height: 26%; transform: translateY(-50%);
-    border: 3px solid #FFD60A; border-radius: var(--r-ctl); box-shadow: 0 0 0 100vmax #00000059; pointer-events: none; }
-  #zoom { position: absolute; z-index: 1; left: 50%; bottom: var(--s3); transform: translateX(-50%); display: flex; gap: var(--s1); padding: var(--s1); border-radius: 999px; background: #000000B3; }
-  #zoom button { width: var(--tap); height: var(--tap); border-radius: 50%; color: #FFF; font: 600 16px system-ui; }
-  #zoom button.on { background: #FFFFFF33; color: #FFD60A; }
+  /* Mientras la cámara está abierta, la ficha se oculta y la cámara usa todo el lugar libre */
+  #home.scanning #card { display: none; }
+  #home.scanning #cam { height: calc(100svh - env(safe-area-inset-top) - var(--s5) - 60px - var(--tabs-h) - env(safe-area-inset-bottom) - 96px); min-height: 280px; margin-bottom: 0; }
+  #band { position: absolute; z-index: 1; left: 5%; right: 5%; top: 50%; height: min(26%, 150px); transform: translateY(-50%);
+    border: 3px solid #FFD60A; border-radius: var(--r-ctl); box-shadow: 0 0 0 100vmax #00000033; pointer-events: none; }
+  #zoom { position: absolute; z-index: 2; right: var(--s3); bottom: var(--s3); width: var(--tap); height: var(--tap); border-radius: 50%;
+    background: #000000B3; color: #FFD60A; font: 700 16px system-ui; }
+  #zoom:active { transform: scale(.94); }
   #ok { position: absolute; z-index: 3; inset: 0; display: flex; align-items: center; justify-content: center; padding: var(--s4); background: #000000CC; color: #32D74B; font: 700 24px var(--mono); text-align: center; word-break: break-all; }
 
   /* ===== Escanear: ficha del equipo ===== */
@@ -222,7 +224,7 @@
     <div id="mode" role="group" aria-label="Qué leer" hidden><button data-m="code">Código</button><button data-m="label">Etiqueta</button></div>
     <p id="aim" class="pill"></p>
     <div id="band" hidden></div>
-    <div id="zoom" role="group" aria-label="Zoom" hidden><button data-z="1" aria-label="Zoom 1x">1x</button><button data-z="2" aria-label="Zoom 2x">2x</button><button data-z="3" aria-label="Zoom 3x">3x</button></div>
+    <button id="zoom" hidden>1x</button>
     <div id="ok" role="status" hidden></div>
   </div>
 
@@ -516,7 +518,8 @@ function renderCard() {
 function updateMain() {
   const live = !!stream || busy;
   btn.classList.toggle('alt', live);
-  btn.innerHTML = live ? svg('stop') + 'Detener' : svg('scan') + 'Nuevo equipo';
+  btn.innerHTML = live ? svg('stop') + 'Cancelar' : svg('scan') + 'Nuevo equipo';
+  $('#home').classList.toggle('scanning', !!stream);
 }
 
 function setMsg(text) {
@@ -570,7 +573,7 @@ async function setMode(label) {
   localStorage.setItem('tagMode', label ? 'label' : 'code');
   $('#mode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.m === 'label') === label)));
   $('#band').hidden = !label;
-  $('#aim').textContent = label ? 'Poné la etiqueta en el recuadro' : 'Apuntá al código del Tag';
+  $('#aim').hidden = true; // en el Tag lo indica Código / Etiqueta
   if (label && !ocr) {
     setMsg('Cargando lector de etiquetas… (solo la primera vez)');
     try { await getOcr(); if (ocrMode) setMsg(''); }
@@ -763,6 +766,7 @@ async function start(t) {
     $('#aim').textContent = `Apuntá al ${STEP[t] || 'Tag'}`;
     setMsg('');
     $('#mode').hidden = t !== 'tag';
+    $('#aim').hidden = t === 'tag';
     if (t === 'tag') setMode(localStorage.getItem('tagMode') === 'label');
     loop(stream);
   } catch (e) {
@@ -792,12 +796,18 @@ addEventListener('resize', fit);
 // Permite alejar el celular hasta donde enfoca y que el código igual se vea grande. Se recuerda el último.
 function setupZoom() {
   const track = stream.getVideoTracks()[0], z = track.getCapabilities?.().zoom;
-  [...$('#zoom').children].forEach(b => b.hidden = !z || +b.dataset.z > z.max);
-  $('#zoom').hidden = !z || z.max < 2;
+  zooms = z ? [1, 2, 3].filter(v => v >= z.min && v <= z.max) : [];
+  $('#zoom').hidden = zooms.length < 2;
   mark(track.getSettings().zoom ?? 1);
 }
 
-const mark = v => [...$('#zoom').children].forEach(b => b.classList.toggle('on', +b.dataset.z === Math.round(v)));
+let zooms = [];
+const mark = v => {
+  const z = $('#zoom');
+  z.textContent = Math.round(v) + 'x';
+  z.dataset.z = Math.round(v);
+  z.setAttribute('aria-label', `Zoom ${Math.round(v)}x. Tocá para cambiar`);
+};
 
 async function setZoom(v) {
   const track = stream?.getVideoTracks()[0], z = track?.getCapabilities?.().zoom;
@@ -877,7 +887,7 @@ $('#sheetClear').onclick = () => setField('');
 $('#sheetClose').onclick = () => $('#sheet').close();
 $('#sheet').onclick = e => { if (e.target === $('#sheet')) $('#sheet').close(); }; // tocar fuera cierra
 $('#mode').onclick = e => { const m = e.target.closest('button')?.dataset.m; if (m) setMode(m === 'label'); };
-$('#zoom').onclick = e => { const z = e.target.closest('button')?.dataset.z; if (z) setZoom(+z); };
+$('#zoom').onclick = () => { const i = zooms.indexOf(+$('#zoom').dataset.z); setZoom(zooms[(i + 1) % zooms.length]); };
 const tab = toList => {
   $('#back').toggleAttribute('aria-current', !toList);
   $('#open').toggleAttribute('aria-current', toList);
