@@ -341,6 +341,10 @@ function load() {
   return [];
 }
 let rows = load();
+// Guarda sin cortar la app si el almacenamiento está lleno o bloqueado; devuelve false si no se pudo
+const store = (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } };
+const SAVE_FAIL = 'No se pudo guardar. Exportá el CSV ahora';
+let saveFail = false;
 let cur = rows.length - 1; // registro que se muestra y completa
 let stream, detector, audio, target;
 let sel = null; // registros marcados para asignar o borrar (índices); null = modo normal
@@ -458,7 +462,12 @@ function render() {
   $('#count').textContent = rows.length;
   $('#reset').disabled = !rows.length;
   renderCard();
-  localStorage.setItem(KEY, JSON.stringify(rows)); // autoguardado
+  const saved = store(KEY, JSON.stringify(rows)); // autoguardado
+  if (!saved !== saveFail) { // cambió: avisa cuando deja de guardar y saca el aviso cuando vuelve a guardar
+    saveFail = !saved;
+    if (saveFail) { setMsg(SAVE_FAIL); alert('No se pudo guardar en el celular (almacenamiento lleno o bloqueado). Exportá el CSV ahora para no perder los equipos.'); }
+    else if (msg.textContent === SAVE_FAIL) setMsg('');
+  }
 }
 
 // ===== Escanear: ficha del registro actual y botón principal según el paso =====
@@ -485,10 +494,13 @@ function dupOf(code, f) {
   const i = rows.findIndex((r, j) => j !== cur && (r.tag === code || r.serial === code));
   return i < 0 ? '' : `Ya está en la lista (equipo ${i + 1}): ${code}`;
 }
+// Limpieza de Tag / Serial (escrito o escaneado): borra los caracteres de control (tab y saltos de línea cuentan como espacio),
+// quita los espacios de los extremos, junta los repetidos y pasa a mayúsculas
+const clean = s => String(s ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
 function typed(input, commit) {
   const f = input.dataset.code, r = rows[cur];
   if (!r) return;
-  const code = input.value.trim().replace(/\s+/g, ' ').toUpperCase();
+  const code = clean(input.value);
   const own = f === 'tag' ? r.serial : r.tag; // no puede ser igual al otro campo del mismo equipo
   const warn = !code ? '' : dupOf(code, f) || (code === own ? `Es el mismo código que el ${f === 'tag' ? 'Serial' : 'Tag'}` : '');
   $('#msg-' + f).textContent = warn;
@@ -536,9 +548,10 @@ function updateMain() {
 }
 
 function setMsg(text) {
+  text ||= saveFail ? SAVE_FAIL : ''; // si no se puede guardar, el aviso queda fijo
   msg.textContent = text;
   msg.hidden = !text;
-  msg.classList.toggle('warn', /^(Ya está|Error)/.test(text));
+  msg.classList.toggle('warn', /^(Ya está|Error|No se pudo)/.test(text));
 }
 
 // ===== Hoja inferior: elegir Ubicación / Estado / Tipo del registro actual =====
@@ -584,7 +597,7 @@ function getOcr() {
 // Cambia entre leer códigos y leer la etiqueta impresa; se recuerda para el próximo Tag
 async function setMode(label) {
   ocrMode = label;
-  localStorage.setItem('tagMode', label ? 'label' : 'code');
+  store('tagMode', label ? 'label' : 'code');
   $('#mode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.m === 'label') === label)));
   $('#band').hidden = !label;
   $('#aim').hidden = true; // en el Tag lo indica Código / Etiqueta
@@ -592,6 +605,10 @@ async function setMode(label) {
     setMsg('Cargando lector de etiquetas… (solo la primera vez)');
     try { await getOcr(); if (ocrMode) setMsg(''); }
     catch (e) { setMsg('Error: no se pudo cargar el lector de etiquetas (' + e.message + ')'); }
+  } else if (!label && !detector) { // abrió en Etiqueta y el lector de códigos todavía se está cargando
+    setMsg('Cargando lector de códigos…');
+    try { await getDetector(); if (stream && !ocrMode) setMsg(''); }
+    catch (e) { if (stream && !ocrMode) setMsg('Error: ' + e.message); }
   }
 }
 // Toma solo el recuadro amarillo del video, lo endereza (ángulo) y lo pasa a blanco y negro.
@@ -659,17 +676,23 @@ async function readLabel() {
   return conf >= 45 ? got : ''; // además se pide la misma lectura 2 veces seguidas
 }
 
-let backup; // Android: lector de respaldo para QR y DataMatrix (el mismo que usa el iPhone)
+let backup, detP, native; // backup: en Android, lector de respaldo para QR y DataMatrix (el mismo que usa el iPhone)
 async function getDetector() {
-  if (!detector) {
-    // Nativo en Chrome/Android; en Safari/iOS se carga el polyfill
-    const BD = window.BarcodeDetector ?? (await import(POLYFILL)).BarcodeDetector;
-    const ok = await BD.getSupportedFormats();
-    detector = new BD({ formats: FORMATS.filter(f => ok.includes(f)) });
-  }
+  detP ??= (async () => {
+    // Nativo en Chrome/Android; en Safari/iOS, o si el nativo no informa ningún formato, se carga el polyfill
+    let BD = window.BarcodeDetector, ok = [];
+    try { if (BD) ok = await BD.getSupportedFormats(); } catch {}
+    native = ok.some(f => FORMATS.includes(f));
+    if (!native) {
+      try { BD = (await import(POLYFILL)).BarcodeDetector; } catch { throw new Error('no se pudo cargar el lector de códigos. Revisá la señal y volvé a tocar 📷'); }
+      ok = await BD.getSupportedFormats();
+    }
+    return (detector = new BD({ formats: FORMATS.filter(f => ok.includes(f)) }));
+  })().catch(e => { detP = null; throw e; });
+  await detP;
   // El lector de Android lee bien los códigos de barras pero no algunos QR (S22): se suma el del iPhone.
   // Se carga aparte, sin demorar la cámara; si no hay señal, se sigue solo con el de Android.
-  if (window.BarcodeDetector && backup === undefined) {
+  if (native && backup === undefined) {
     backup = null;
     import(POLYFILL).then(m => { backup = new m.BarcodeDetector({ formats: ['qr_code', 'data_matrix'] }); }).catch(() => { backup = undefined; });
   }
@@ -702,15 +725,16 @@ async function loop(s) {
           if (code && code === last && ocrMode) hit = { rawValue: code };
           last = code;
         } else {
-          [hit] = await detector.detect(video);
+          [hit] = detector ? await detector.detect(video) : []; // en Etiqueta → Código puede estar cargándose
           // Si el de Android no encontró nada, prueba el de respaldo (cada 2 vueltas, para no cargar el celular)
           if (!hit && backup && turn++ % 2 === 0 && stream === s) [hit] = await backup.detect(video);
         }
-        if (hit && stream === s) {
+        const code = hit && clean(hit.rawValue); // se guarda igual que lo escrito a mano
+        if (code && stream === s) {
           video.pause();
           $('#band').hidden = true;
-          const warn = save(hit.rawValue), ok = $('#ok');
-          ok.textContent = warn || '✓ ' + hit.rawValue;
+          const warn = save(code), ok = $('#ok');
+          ok.textContent = warn || '✓ ' + code;
           ok.style.color = warn ? '#ff9f0a' : '';
           ok.hidden = false;
           await new Promise(r => setTimeout(r, 1200));
@@ -750,13 +774,23 @@ async function openCam(zoom) {
   for (const d of cams) {
     try {
       const t = await get(d.deviceId);
-      if (autofocus(t)) { localStorage.setItem('camAF', d.deviceId); return t; }
+      if (autofocus(t)) { store('camAF', d.deviceId); return t; }
       t.getTracks().forEach(x => x.stop());
     } catch {}
   }
   localStorage.removeItem('camAF');
   return get(); // ninguna enfoca sola: vuelve a la de siempre
 }
+
+// Errores de la cámara en español, con qué hacer
+const camError = e => ({
+  NotAllowedError: 'no hay permiso para usar la cámara. ' + (ANDROID
+    ? 'Tocá el ícono a la izquierda de la dirección → Permisos → Cámara → Permitir, y volvé a tocar 📷.'
+    : 'En Configuración → Safari → Cámara elegí Permitir o Preguntar, recargá la página y volvé a tocar 📷.'),
+  NotFoundError: 'no se encontró ninguna cámara en el celular.',
+  NotReadableError: 'otra app está usando la cámara. Cerrala y volvé a tocar 📷; si sigue, reiniciá el celular.',
+  OverconstrainedError: 'la cámara no aceptó la configuración pedida. Volvé a tocar 📷; si sigue, cerrá y abrí el navegador.',
+}[e?.name] || e?.message || String(e));
 
 async function start(t) {
   if (busy) return;
@@ -769,7 +803,9 @@ async function start(t) {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('la cámara requiere abrir la página con https://');
     audio ??= new AudioContext(); // se crea tras un toque (requisito de iOS)
     setMsg('Abriendo cámara…');
-    await getDetector();
+    // En modo Etiqueta el lector de códigos no hace falta para abrir: se carga aparte por si se cambia a Código
+    if (t === 'tag' && localStorage.getItem('tagMode') === 'label') getDetector().catch(() => {});
+    else await getDetector();
     if (my !== session) return; // se canceló mientras cargaba
     const zoom = +localStorage.getItem('zoom') || 1;
     // El zoom se pide al abrir: cambiarlo después en Safari puede bajar la resolución y dejar la imagen vertical
@@ -794,7 +830,7 @@ async function start(t) {
     if (t === 'tag') setMode(localStorage.getItem('tagMode') === 'label');
     loop(stream);
   } catch (e) {
-    if (my === session) { stop(); setMsg('Error: ' + e.message); } // si se canceló, no es un error
+    if (my === session) { stop(); setMsg('Error: ' + camError(e)); } // si se canceló, no es un error
   } finally {
     if (my === session) busy = false; // si se canceló, stop() ya lo liberó
     updateMain();
@@ -839,7 +875,7 @@ async function setZoom(v) {
   try {
     // Se repite resolución (y enfoque en Android): applyConstraints reemplaza todo lo pedido antes
     await track.applyConstraints(want(v));
-    localStorage.setItem('zoom', v);
+    store('zoom', v);
     mark(v);
   } catch {}
 }
@@ -986,7 +1022,9 @@ $('#reset').onclick = () => {
   render(); // guarda la lista vacía en la clave "codigos"
   scrollTo(0, 0);
 };
-document.onvisibilitychange = () => document.hidden && stop();
+// Al pasar a segundo plano o cerrar: guarda lo que se está escribiendo en Tag / Serial y apaga la cámara
+document.addEventListener('visibilitychange', () => { if (document.hidden) { flush(); stop(); } });
+addEventListener('pagehide', flush);
 
 render();
 if (loadWarn) alert(loadWarn);
