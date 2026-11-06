@@ -326,8 +326,21 @@ const $ = s => document.querySelector(s);
 const btn = $('#scan'), list = $('#list'), msg = $('#msg'), home = $('#home'), panel = $('#panel');
 let video; // se crea uno nuevo en cada apertura: reusar el mismo en Safari deja el tamaño de la sesión anterior
 
-// Registros { tag, serial, date }; los guardados con la versión anterior pasan a Tag
-let rows = JSON.parse(localStorage.getItem(KEY) || '[]').map(r => r.code ? { tag: r.code, serial: '', date: r.date } : r);
+// Registros { tag, serial, date }; los guardados con la versión anterior pasan a Tag.
+// Si lo guardado está dañado, se copia a "codigos_dañado" (para poder recuperarlo) y la app arranca con la lista vacía.
+let loadWarn = '';
+function load() {
+  const raw = localStorage.getItem(KEY);
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (Array.isArray(v)) return v.filter(r => r && typeof r === 'object').map(r => r.code ? { tag: r.code, serial: '', date: r.date } : r);
+  } catch {}
+  try { localStorage.setItem(KEY + '_dañado', raw); } catch {}
+  loadWarn = 'Los datos guardados estaban dañados y no se pudieron leer. Se guardó una copia y la lista empezó vacía.';
+  return [];
+}
+let rows = load();
 let cur = rows.length - 1; // registro que se muestra y completa
 let stream, detector, audio, target;
 let sel = null; // registros marcados para asignar o borrar (índices); null = modo normal
@@ -475,7 +488,7 @@ function dupOf(code, f) {
 function typed(input, commit) {
   const f = input.dataset.code, r = rows[cur];
   if (!r) return;
-  const code = input.value.trim().toUpperCase();
+  const code = input.value.trim().replace(/\s+/g, ' ').toUpperCase();
   const own = f === 'tag' ? r.serial : r.tag; // no puede ser igual al otro campo del mismo equipo
   const warn = !code ? '' : dupOf(code, f) || (code === own ? `Es el mismo código que el ${f === 'tag' ? 'Serial' : 'Tag'}` : '');
   $('#msg-' + f).textContent = warn;
@@ -562,7 +575,8 @@ let ocr, ocrP, ocrMode = false;
 function getOcr() {
   ocrP ??= (async () => {
     const w = await (await import(TESS)).default.createWorker('eng');
-    await w.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-', tessedit_pageseg_mode: '7' });
+    // Sin lista de caracteres: con lista, el lector junta las palabras (CAM 01 → CAM01). Lo que no sea letra, número o guion se descarta en labelCode.
+    await w.setParameters({ tessedit_pageseg_mode: '7', preserve_interword_spaces: '1' });
     return (ocr = w);
   })().catch(e => { ocrP = null; throw e; });
   return ocrP;
@@ -623,12 +637,15 @@ function cropBand(angle) {
   g.putImageData(d, 0, 0);
   return band;
 }
-// Código de la etiqueta: letras (mayúsculas o minúsculas), números y guion, de 3 a 20; se guarda en mayúsculas.
-// Sirven KB0035, it-7, IT-DEPOSITO, 0035. En la parte final con números, O → 0 e I/L → 1 (en la P-touch se parecen).
-const labelCode = t => t.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').split(/\s+/)
-  .map(w => w.replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-'))
-  .map(w => w.replace(/^([A-Z-]*?)([OIL0-9]*[0-9][OIL0-9]*)$/, (_, a, b) => a + b.replace(/O/g, '0').replace(/[IL]/g, '1')))
-  .filter(w => w.length >= 3 && w.length <= 20).sort((a, b) => b.length - a.length)[0] || '';
+// Código de la etiqueta: letras (mayúsculas o minúsculas), números, guion y espacios, de 3 a 30; se guarda en mayúsculas.
+// Sirven KB0035, it-7, IT-DEPOSITO, 0035, CAM 01, MacBook Pro. En cada palabra con números, O → 0 e I/L → 1 (en la P-touch se parecen).
+const labelCode = t => {
+  const code = t.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').split(/\s+/)
+    .map(w => w.replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-'))
+    .map(w => w.replace(/^([A-Z-]*?)([OIL0-9]*[0-9][OIL0-9]*)$/, (_, a, b) => a + b.replace(/O/g, '0').replace(/[IL]/g, '1')))
+    .filter(Boolean).join(' ');
+  return code.length >= 3 && code.length <= 30 ? code : '';
+};
 // Una lectura: primero derecho; si no sale segura, prueba la etiqueta un poco girada
 async function readLabel() {
   let got = '', conf = 0;
@@ -707,6 +724,7 @@ async function loop(s) {
 }
 
 let busy = false; // evita abrir dos cámaras si se toca dos veces
+let session = 0; // cada apertura tiene su número; stop() lo cambia y la apertura en curso se descarta
 const SIZE = { width: { ideal: 1920 }, height: { ideal: 1080 } };
 const ANDROID = /Android/i.test(navigator.userAgent);
 // Cada pedido va en su propio grupo "advanced": si el celular no soporta uno (p. ej. enfoque), el zoom igual se aplica.
@@ -742,8 +760,9 @@ async function openCam(zoom) {
 
 async function start(t) {
   if (busy) return;
-  busy = true;
   stop();
+  busy = true;
+  const my = ++session;
   target = t;
   updateMain();
   try {
@@ -751,9 +770,12 @@ async function start(t) {
     audio ??= new AudioContext(); // se crea tras un toque (requisito de iOS)
     setMsg('Abriendo cámara…');
     await getDetector();
+    if (my !== session) return; // se canceló mientras cargaba
     const zoom = +localStorage.getItem('zoom') || 1;
     // El zoom se pide al abrir: cambiarlo después en Safari puede bajar la resolución y dejar la imagen vertical
-    stream = await openCam(zoom);
+    const s = await openCam(zoom);
+    if (my !== session) { s.getTracks().forEach(x => x.stop()); return; } // se canceló mientras abría: se apaga
+    stream = s;
     video = document.createElement('video');
     video.muted = video.playsInline = video.autoplay = true;
     video.setAttribute('playsinline', '');
@@ -762,6 +784,7 @@ async function start(t) {
     video.srcObject = stream;
     $('#cam').hidden = false;
     await video.play();
+    if (my !== session) return; // se canceló mientras arrancaba el video (stop() ya cerró todo)
     fit();
     setupZoom();
     $('#aim').textContent = `Apuntá al ${STEP[t] || 'Tag'}`;
@@ -771,10 +794,9 @@ async function start(t) {
     if (t === 'tag') setMode(localStorage.getItem('tagMode') === 'label');
     loop(stream);
   } catch (e) {
-    stop();
-    setMsg('Error: ' + e.message);
+    if (my === session) { stop(); setMsg('Error: ' + e.message); } // si se canceló, no es un error
   } finally {
-    busy = false;
+    if (my === session) busy = false; // si se canceló, stop() ya lo liberó
     updateMain();
   }
 }
@@ -823,6 +845,8 @@ async function setZoom(v) {
 }
 
 function stop() {
+  session++; // descarta una apertura que esté en curso
+  busy = false;
   if (video) { video.srcObject = null; video.remove(); video = null; }
   stream?.getTracks().forEach(t => t.stop());
   stream = null;
@@ -867,7 +891,7 @@ async function exportCSV() {
 
 // El botón principal hace el paso que falta: Tag → Serial → siguiente equipo
 // Botón principal: nueva ficha (o detener la cámara si está abierta). La cámara se abre desde cada campo.
-btn.onclick = () => stream ? stop() : newRecord();
+btn.onclick = () => stream || busy ? stop() : newRecord();
 $('#empty').onclick = newRecord;
 $('#card').onclick = e => {
   const b = e.target.closest('button');
@@ -965,6 +989,7 @@ $('#reset').onclick = () => {
 document.onvisibilitychange = () => document.hidden && stop();
 
 render();
+if (loadWarn) alert(loadWarn);
 </script>
 </body>
 </html>
