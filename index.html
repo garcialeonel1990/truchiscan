@@ -58,6 +58,7 @@
   #home.scanning #cam { height: calc(100svh - env(safe-area-inset-top) - var(--s5) - 60px - var(--tabs-h) - env(safe-area-inset-bottom) - 96px); min-height: 280px; margin-bottom: 0; }
   #band { position: absolute; z-index: 1; left: 5%; right: 5%; top: 50%; height: min(26%, 150px); transform: translateY(-50%);
     border: 3px solid #FFD60A; border-radius: var(--r-ctl); box-shadow: 0 0 0 100vmax #00000033; pointer-events: none; }
+  #band.line { height: 40px; } /* Serial grabado: una sola línea, para que no entre el borde metálico del equipo */
   #zoom { position: absolute; z-index: 2; right: var(--s3); bottom: var(--s3); width: var(--tap); height: var(--tap); border-radius: 50%;
     background: #000000B3; color: #FFD60A; font: 700 16px system-ui; }
   #zoom:active { transform: scale(.94); }
@@ -597,12 +598,13 @@ function getOcr() {
 // Cambia entre leer códigos y leer la etiqueta impresa; se recuerda para el próximo Tag
 async function setMode(label) {
   ocrMode = label;
-  store('tagMode', label ? 'label' : 'code');
+  if (target === 'tag') store('tagMode', label ? 'label' : 'code'); // el Serial no se recuerda: abre siempre en Código
   $('#mode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.m === 'label') === label)));
   $('#band').hidden = !label;
-  $('#aim').hidden = true; // en el Tag lo indica Código / Etiqueta
+  $('#band').classList.toggle('line', target === 'serial');
+  $('#aim').hidden = true; // lo indican los botones Código / Etiqueta (Tag) o Código / Texto (Serial)
   if (label && !ocr) {
-    setMsg('Cargando lector de etiquetas… (solo la primera vez)');
+    setMsg(`Cargando lector de ${target === 'serial' ? 'texto' : 'etiquetas'}… (solo la primera vez)`);
     try { await getOcr(); if (ocrMode) setMsg(''); }
     catch (e) { setMsg('Error: no se pudo cargar el lector de etiquetas (' + e.message + ')'); }
   } else if (!label && !detector) { // abrió en Etiqueta y el lector de códigos todavía se está cargando
@@ -630,6 +632,19 @@ function cropBand(angle) {
   for (let i = 0, j = 0; i < p.length; i += 4, j++) {
     const v = Math.round(0.5 * Math.max(p[i], p[i + 1], p[i + 2]) + 0.5 * (0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]));
     lum[j] = v; hist[v]++;
+  }
+  // Solo en el Serial: quita la luz de fondo comparando cada punto con el gris promedio de su zona. Así el texto grabado
+  // (gris sobre gris, como el serial de los teclados Apple) queda oscuro sobre claro. En el Tag no se usa: borra parte de las letras grandes de la P-touch.
+  if (target === 'serial') {
+    const r = Math.max(4, h >> 2), W1 = w + 1, ii = new Float64Array(W1 * (h + 1));
+    for (let y = 0; y < h; y++) for (let x = 0, s = 0; x < w; x++) { s += lum[y * w + x]; ii[(y + 1) * W1 + x + 1] = ii[y * W1 + x + 1] + s; }
+    hist.fill(0);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1), y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+      const m = (ii[y1 * W1 + x1] - ii[y0 * W1 + x1] - ii[y1 * W1 + x0] + ii[y0 * W1 + x0]) / ((x1 - x0) * (y1 - y0));
+      const v = Math.max(0, Math.min(255, Math.round(255 - (m - lum[y * w + x]) * 6)));
+      lum[y * w + x] = v; hist[v]++;
+    }
   }
   let sum = 0, sumB = 0, wB = 0, best = 0, th = 128; // umbral automático (Otsu): se adapta a poca luz y reflejos
   for (let t = 0; t < 256; t++) sum += t * hist[t];
@@ -663,17 +678,27 @@ const labelCode = t => {
     .filter(Boolean).join(' ');
   return code.length >= 3 && code.length <= 30 ? code : '';
 };
+// Serial leído como texto: se queda con el bloque más largo (lo que entra cortado del costado queda separado por un espacio).
+// Tiene que tener letras y números. Si parece de Apple (10, 11, 12 o 17 letras y números), O → 0 e I → 1: Apple no usa O ni I.
+const serialCode = t => {
+  let w = t.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').split(/\s+/).map(x => x.replace(/^-+|-+$/g, ''))
+    .sort((a, b) => b.length - a.length)[0] || '';
+  if (/^([A-Z0-9]{10,12}|[A-Z0-9]{17})$/.test(w)) w = w.replace(/O/g, '0').replace(/I/g, '1');
+  return w.length >= 5 && w.length <= 30 && /[A-Z]/.test(w) && /[0-9]/.test(w) ? w : '';
+};
 // Una lectura: primero derecho; si no sale segura, prueba la etiqueta un poco girada
 async function readLabel() {
   let got = '', conf = 0;
+  const serial = target === 'serial';
   for (const a of [0, -8, 8, -15, 15]) {
     if (!ocrMode || !video) break;
     const { data } = await ocr.recognize(cropBand(a));
-    const w = labelCode(data.text);
+    const w = serial ? serialCode(data.text) : labelCode(data.text);
     if (w && data.confidence > conf) { got = w; conf = data.confidence; }
     if (w && data.confidence >= 70) break;
   }
-  return conf >= 45 ? got : ''; // además se pide la misma lectura 2 veces seguidas
+  // Serial: 60 o más, porque una mala lectura (4 → B, 5 → 8) llega a 47. Además se pide la misma lectura 2 veces seguidas.
+  return conf >= (serial ? 60 : 45) ? got : '';
 }
 
 let backup, detP, native; // backup: en Android, lector de respaldo para QR y DataMatrix (el mismo que usa el iPhone)
@@ -825,9 +850,9 @@ async function start(t) {
     setupZoom();
     $('#aim').textContent = `Apuntá al ${STEP[t] || 'Tag'}`;
     setMsg('');
-    $('#mode').hidden = t !== 'tag';
-    $('#aim').hidden = t === 'tag';
-    if (t === 'tag') setMode(localStorage.getItem('tagMode') === 'label');
+    $('#mode [data-m=label]').textContent = t === 'serial' ? 'Texto' : 'Etiqueta';
+    $('#mode').hidden = false;
+    setMode(t === 'tag' && localStorage.getItem('tagMode') === 'label'); // el Serial abre siempre en Código
     loop(stream);
   } catch (e) {
     if (my === session) { stop(); setMsg('Error: ' + camError(e)); } // si se canceló, no es un error
