@@ -619,9 +619,64 @@ async function setMode(label) {
 // Toma solo el recuadro amarillo del video, lo endereza (ángulo) y lo pasa a blanco y negro.
 // El gris mezcla el canal más alto con la luminancia: así la cinta amarilla queda clara igual que la blanca.
 const band = document.createElement('canvas');
+const textBand = document.createElement('canvas');
 const serialAngles = [0, -8, 0, 8, 0, -15, 0, 15];
 let serialAngle = 0;
-function cropBand(angle, local = true) {
+// Actualiza el histograma al mover la ventana, sin ordenar todos los vecinos por píxel.
+function medianFilter(lum, w, h, radius = 1) {
+  const out = lum.slice(), counts = new Uint8Array(256);
+  const size = 2 * radius + 1, rank = (size * size) >> 1;
+  if (w < size || h < size) return out;
+  for (let y = radius; y < h - radius; y++) {
+    counts.fill(0);
+    for (let dy = -radius; dy <= radius; dy++) for (let x = 0; x < size; x++) counts[lum[(y + dy) * w + x]]++;
+    let mid = 0, below = 0;
+    while (below + counts[mid] <= rank) below += counts[mid++];
+    for (let x = radius; x < w - radius; x++) {
+      out[y * w + x] = mid;
+      if (x === w - radius - 1) break;
+      for (let dy = -radius; dy <= radius; dy++) {
+        const row = (y + dy) * w, old = lum[row + x - radius], next = lum[row + x + radius + 1];
+        counts[old]--; if (old < mid) below--;
+        counts[next]++; if (next < mid) below++;
+      }
+      while (below > rank) below -= counts[--mid];
+      while (below + counts[mid] <= rank) below += counts[mid++];
+    }
+  }
+  return out;
+}
+// Ubica una línea de letras por su tamaño y alineación. Si no hay una línea clara, conserva el recuadro completo.
+function serialBox(dark, w, h) {
+  const seen = dark.slice(), stack = new Int32Array(w * h), letters = [];
+  for (let j = 0; j < seen.length; j++) {
+    if (!seen[j]) continue;
+    let n = 0, x0 = w, x1 = 0, y0 = h, y1 = 0, area = 0;
+    seen[j] = 0; stack[n++] = j;
+    while (n) {
+      const p = stack[--n], x = p % w, y = (p / w) | 0;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); area++;
+      if (x > 0 && seen[p - 1]) { seen[p - 1] = 0; stack[n++] = p - 1; }
+      if (x < w - 1 && seen[p + 1]) { seen[p + 1] = 0; stack[n++] = p + 1; }
+      if (y > 0 && seen[p - w]) { seen[p - w] = 0; stack[n++] = p - w; }
+      if (y < h - 1 && seen[p + w]) { seen[p + w] = 0; stack[n++] = p + w; }
+    }
+    const height = y1 - y0 + 1, cy = (y0 + y1) / 2;
+    if (height >= h * .18 && height <= h * .7 && area >= height * 2)
+      letters.push({ x0, x1, y0, y1, height, cy });
+  }
+  const groups = [];
+  for (const c of letters.sort((a, b) => a.x0 - b.x0)) {
+    const group = groups.find(g => c.x0 - g.x1 <= g.heights / g.count * 2 && Math.abs(c.cy - g.lastCy) <= g.heights / g.count * .35);
+    if (group) {
+      group.x1 = Math.max(group.x1, c.x1); group.y0 = Math.min(group.y0, c.y0); group.y1 = Math.max(group.y1, c.y1);
+      group.cy += c.cy; group.lastCy = c.cy; group.heights += c.height; group.count++;
+    } else groups.push({ ...c, lastCy: c.cy, heights: c.height, count: 1 });
+  }
+  const distance = g => Math.abs(g.cy / g.count - h / 2);
+  return groups.filter(g => g.count >= 5).sort((a, b) => distance(a) - distance(b) || b.count - a.count)[0];
+}
+function cropBand(angle, local = true, denoise = false) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
   const sw = b.width / k, sh = b.height / k, sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
@@ -639,15 +694,8 @@ function cropBand(angle, local = true) {
     lum[j] = v; hist[v]++;
   }
   // Serial impreso: elimina el grano fino del metal antes del umbral global, sin amplificar la textura de fondo.
-  if (target === 'serial' && !local) {
-    const original = lum.slice(), neighbors = new Uint8Array(9);
-    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-      const j = y * w + x;
-      neighbors[0] = original[j - w - 1]; neighbors[1] = original[j - w]; neighbors[2] = original[j - w + 1];
-      neighbors[3] = original[j - 1]; neighbors[4] = original[j]; neighbors[5] = original[j + 1];
-      neighbors[6] = original[j + w - 1]; neighbors[7] = original[j + w]; neighbors[8] = original[j + w + 1];
-      neighbors.sort(); lum[j] = neighbors[4];
-    }
+  if (target === 'serial' && (!local || denoise)) {
+    lum.set(medianFilter(lum, w, h, denoise ? 2 : 1));
     hist.fill(0);
     for (const v of lum) hist[v]++;
   }
@@ -670,6 +718,8 @@ function cropBand(angle, local = true) {
     wB += hist[t]; if (!wB) continue; const wF = lum.length - wB; if (!wF) break; sumB += t * hist[t];
     const v = wB * wF * (sumB / wB - (sum - sumB) / wF) ** 2; if (v > best) { best = v; th = t; }
   }
+  // Si el primer filtro quedó casi negro, el respaldo exige más contraste para quitar la textura densa.
+  if (target === 'serial' && denoise) th = Math.min(th, 100);
   const dark = new Uint8Array(w * h);
   for (let j = 0; j < dark.length; j++) dark[j] = lum[j] <= th ? 1 : 0;
   // Lo oscuro que toca el borde del recuadro es el equipo o la sombra de la cinta, no texto: se pinta de blanco
@@ -685,6 +735,19 @@ function cropBand(angle, local = true) {
   }
   for (let i = 0, j = 0; i < p.length; i += 4, j++) p[i] = p[i + 1] = p[i + 2] = dark[j] ? 0 : 255;
   g.putImageData(d, 0, 0);
+  // Envía solo la línea detectada al OCR; el borde blanco evita que recorte los extremos de las letras.
+  band.ocrSkip = target === 'serial' && !local && dark.reduce((sum, v) => sum + v, 0) > dark.length * .6;
+  if (band.ocrSkip) return band;
+  const box = target === 'serial' && serialBox(dark, w, h);
+  if (box) {
+    const pad = Math.max(8, Math.round(h / 10)), bw = box.x1 - box.x0 + 1, bh = box.y1 - box.y0 + 1;
+    textBand.width = bw + 2 * pad; textBand.height = bh + 2 * pad;
+    const tg = textBand.getContext('2d');
+    tg.fillStyle = '#fff'; tg.fillRect(0, 0, textBand.width, textBand.height);
+    tg.drawImage(band, box.x0, box.y0, bw, bh, pad, pad, bw, bh);
+    textBand.ocrSkip = false;
+    return textBand;
+  }
   return band;
 }
 // Código de la etiqueta: letras (mayúsculas o minúsculas), números, guion y espacios, de 3 a 30; se guarda en mayúsculas.
@@ -739,7 +802,7 @@ function serialReading(data) {
 // Serial: dos preparaciones en blanco y negro. Si fallan, prueba otro ángulo en el próximo cuadro.
 // Tag: conserva los cinco intentos por lectura.
 async function readLabel() {
-  let got = '', conf = 0;
+  let got = '', conf = 0, noisy = false;
   const serial = target === 'serial', revision = ocrRevision, s = stream;
   const active = () => ocrMode && video && stream === s && revision === ocrRevision;
   // El serial puede compartir el recuadro con otra línea; el Tag sigue siendo una sola línea.
@@ -748,7 +811,9 @@ async function readLabel() {
   const attempts = serial ? [[angle, false], [angle, true]] : [0, -8, 8, -15, 15].map(a => [a, true]);
   for (const [a, local] of attempts) {
     if (!active()) return '';
-    const { data } = await ocr.recognize(cropBand(a, local), {}, { blocks: serial });
+    const input = cropBand(a, local, noisy);
+    if (serial && input.ocrSkip) { noisy = true; continue; }
+    const { data } = await ocr.recognize(input, {}, { blocks: serial });
     if (!active()) return '';
     const reading = serial ? serialReading(data) : { code: labelCode(data.text), confidence: data.confidence };
     if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; }
@@ -807,9 +872,11 @@ async function loop(s) {
         if (ocrMode) {
           // Serial: tolera cuadros sin texto durante 3 s. Una lectura distinta reinicia la confirmación.
           // Tag: sigue pidiendo dos lecturas consecutivas.
+          const readAt = performance.now();
           const code = ocr ? await readLabel() : '';
           const now = performance.now(), serial = target === 'serial';
-          if (serial && now - lastAt > 3000) last = '';
+          // El límite mide el tiempo entre capturas; el trabajo del OCR actual no invalida la lectura anterior.
+          if (serial && readAt - lastAt > 3000) last = '';
           if (code && code === last && ocrMode && revision === ocrRevision) hit = { rawValue: code };
           if (code || !serial) { last = code; lastAt = now; }
         } else {
