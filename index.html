@@ -599,6 +599,7 @@ function getOcr() {
 // Cambia entre leer códigos y leer la etiqueta impresa; se recuerda para el próximo Tag
 async function setMode(label) {
   ocrRevision++;
+  serialAngle = 0;
   ocrMode = label;
   if (target === 'tag') store('tagMode', label ? 'label' : 'code'); // el Serial no se recuerda: abre siempre en Código
   $('#mode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.m === 'label') === label)));
@@ -618,9 +619,9 @@ async function setMode(label) {
 // Toma solo el recuadro amarillo del video, lo endereza (ángulo) y lo pasa a blanco y negro.
 // El gris mezcla el canal más alto con la luminancia: así la cinta amarilla queda clara igual que la blanca.
 const band = document.createElement('canvas');
-const serialAngles = [-8, 8, -15, 15];
+const serialAngles = [0, -8, 0, 8, 0, -15, 0, 15];
 let serialAngle = 0;
-function cropBand(angle) {
+function cropBand(angle, local = true) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
   const sw = b.width / k, sh = b.height / k, sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
@@ -637,9 +638,22 @@ function cropBand(angle) {
     const v = Math.round(0.5 * Math.max(p[i], p[i + 1], p[i + 2]) + 0.5 * (0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]));
     lum[j] = v; hist[v]++;
   }
+  // Serial impreso: elimina el grano fino del metal antes del umbral global, sin amplificar la textura de fondo.
+  if (target === 'serial' && !local) {
+    const original = lum.slice(), neighbors = new Uint8Array(9);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const j = y * w + x;
+      neighbors[0] = original[j - w - 1]; neighbors[1] = original[j - w]; neighbors[2] = original[j - w + 1];
+      neighbors[3] = original[j - 1]; neighbors[4] = original[j]; neighbors[5] = original[j + 1];
+      neighbors[6] = original[j + w - 1]; neighbors[7] = original[j + w]; neighbors[8] = original[j + w + 1];
+      neighbors.sort(); lum[j] = neighbors[4];
+    }
+    hist.fill(0);
+    for (const v of lum) hist[v]++;
+  }
   // Solo en el Serial: quita la luz de fondo comparando cada punto con el gris promedio de su zona. Así el texto grabado
   // (gris sobre gris, como el serial de los teclados Apple) queda oscuro sobre claro. En el Tag no se usa: borra parte de las letras grandes de la P-touch.
-  if (target === 'serial') {
+  if (target === 'serial' && local) {
     const r = Math.max(4, h >> 2), W1 = w + 1, ii = new Float64Array(W1 * (h + 1));
     for (let y = 0; y < h; y++) for (let x = 0, s = 0; x < w; x++) { s += lum[y * w + x]; ii[(y + 1) * W1 + x + 1] = ii[y * W1 + x + 1] + s; }
     hist.fill(0);
@@ -704,14 +718,25 @@ function serialReading(data) {
   for (const block of data.blocks || []) for (const paragraph of block.paragraphs || []) for (const line of paragraph.lines || []) {
     const code = serialCode(line.text || '');
     if (!code) continue;
-    const words = (line.words || []).map(w => ({ ...w, part: normalizeSerial(w.text.toUpperCase().replace(/[^A-Z0-9-]/g, ''), appleSerial(code)) }))
-      .filter(w => w.part && code.includes(w.part));
-    const confidence = words.length && words.map(w => w.part).join('') === code ? Math.min(...words.map(w => w.confidence)) : 0;
-    if (confidence > best.confidence) best = { code, confidence };
+    const words = (line.words || []).map(w => ({ part: normalizeSerial(w.text.toUpperCase().replace(/[^A-Z0-9-]/g, ''), appleSerial(code)), confidence: w.confidence }))
+      .filter(w => w.part);
+    // Busca las palabras que forman el serial. Un "3" o una "I" sueltos al costado no forman parte de su confianza.
+    for (let start = 0; start < words.length; start++) {
+      let joined = '', confidence = 100;
+      for (let end = start; end < words.length; end++) {
+        joined += words[end].part;
+        confidence = Math.min(confidence, words[end].confidence);
+        if (!code.startsWith(joined)) break;
+        if (joined === code) {
+          if (confidence > best.confidence) best = { code, confidence };
+          break;
+        }
+      }
+    }
   }
   return best;
 }
-// Serial: primero derecho y un ángulo alternativo por vuelta, para volver pronto a una imagen nueva.
+// Serial: dos preparaciones en blanco y negro. Si fallan, prueba otro ángulo en el próximo cuadro.
 // Tag: conserva los cinco intentos por lectura.
 async function readLabel() {
   let got = '', conf = 0;
@@ -719,15 +744,18 @@ async function readLabel() {
   const active = () => ocrMode && video && stream === s && revision === ocrRevision;
   // El serial puede compartir el recuadro con otra línea; el Tag sigue siendo una sola línea.
   await ocr.setParameters({ tessedit_pageseg_mode: serial ? '6' : '7' });
-  const angles = serial ? [0, serialAngles[serialAngle++ % serialAngles.length]] : [0, -8, 8, -15, 15];
-  for (const a of angles) {
+  const angle = serialAngles[serialAngle];
+  const attempts = serial ? [[angle, false], [angle, true]] : [0, -8, 8, -15, 15].map(a => [a, true]);
+  for (const [a, local] of attempts) {
     if (!active()) return '';
-    const { data } = await ocr.recognize(cropBand(a), {}, { blocks: serial });
+    const { data } = await ocr.recognize(cropBand(a, local), {}, { blocks: serial });
     if (!active()) return '';
     const reading = serial ? serialReading(data) : { code: labelCode(data.text), confidence: data.confidence };
     if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; }
     if (reading.code && reading.confidence >= (serial ? 60 : 70)) break;
   }
+  // Conserva el ángulo que funcionó para confirmar la segunda lectura; los fallos vuelven seguido a 0°.
+  if (serial && conf < 60) serialAngle = (serialAngle + 1) % serialAngles.length;
   // Serial: confianza mínima 60 y dos lecturas iguales dentro de una ventana breve (ver loop).
   return conf >= (serial ? 60 : 45) ? got : '';
 }
