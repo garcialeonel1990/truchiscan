@@ -618,6 +618,8 @@ async function setMode(label) {
 // Toma solo el recuadro amarillo del video, lo endereza (ángulo) y lo pasa a blanco y negro.
 // El gris mezcla el canal más alto con la luminancia: así la cinta amarilla queda clara igual que la blanca.
 const band = document.createElement('canvas');
+const serialAngles = [-8, 8, -15, 15];
+let serialAngle = 0;
 function cropBand(angle) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
@@ -709,22 +711,24 @@ function serialReading(data) {
   }
   return best;
 }
-// Una lectura: primero derecho; si no sale segura, prueba la etiqueta un poco girada
+// Serial: primero derecho y un ángulo alternativo por vuelta, para volver pronto a una imagen nueva.
+// Tag: conserva los cinco intentos por lectura.
 async function readLabel() {
   let got = '', conf = 0;
   const serial = target === 'serial', revision = ocrRevision, s = stream;
   const active = () => ocrMode && video && stream === s && revision === ocrRevision;
   // El serial puede compartir el recuadro con otra línea; el Tag sigue siendo una sola línea.
   await ocr.setParameters({ tessedit_pageseg_mode: serial ? '6' : '7' });
-  for (const a of [0, -8, 8, -15, 15]) {
+  const angles = serial ? [0, serialAngles[serialAngle++ % serialAngles.length]] : [0, -8, 8, -15, 15];
+  for (const a of angles) {
     if (!active()) return '';
     const { data } = await ocr.recognize(cropBand(a), {}, { blocks: serial });
     if (!active()) return '';
     const reading = serial ? serialReading(data) : { code: labelCode(data.text), confidence: data.confidence };
     if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; }
-    if (reading.code && reading.confidence >= 70) break;
+    if (reading.code && reading.confidence >= (serial ? 60 : 70)) break;
   }
-  // Serial: 60 o más, porque una mala lectura (4 → B, 5 → 8) llega a 47. Además se pide la misma lectura 2 veces seguidas.
+  // Serial: confianza mínima 60 y dos lecturas iguales dentro de una ventana breve (ver loop).
   return conf >= (serial ? 60 : 45) ? got : '';
 }
 
@@ -765,18 +769,21 @@ function save(code) {
 
 // Lee sobre el cuadro completo; al leer congela la imagen y muestra el código 1,2 s antes de cerrar
 async function loop(s) {
-  let turn = 0, last = '', revision = ocrRevision;
+  let turn = 0, last = '', lastAt = 0, revision = ocrRevision;
   while (stream === s) {
     try {
       fit(); // por si Safari no avisa que la imagen cambió de forma
       if (video.readyState >= 2) {
         let hit;
-        if (revision !== ocrRevision) { last = ''; revision = ocrRevision; }
+        if (revision !== ocrRevision) { last = ''; lastAt = 0; revision = ocrRevision; }
         if (ocrMode) {
-          // Etiqueta impresa: se guarda solo si sale igual en 2 lecturas seguidas (evita guardar una mala lectura)
+          // Serial: tolera cuadros sin texto durante 3 s. Una lectura distinta reinicia la confirmación.
+          // Tag: sigue pidiendo dos lecturas consecutivas.
           const code = ocr ? await readLabel() : '';
-          if (code && code === last && ocrMode) hit = { rawValue: code };
-          last = code;
+          const now = performance.now(), serial = target === 'serial';
+          if (serial && now - lastAt > 3000) last = '';
+          if (code && code === last && ocrMode && revision === ocrRevision) hit = { rawValue: code };
+          if (code || !serial) { last = code; lastAt = now; }
         } else {
           [hit] = detector ? await detector.detect(video) : []; // en Etiqueta → Código puede estar cargándose
           // Si el de Android no encontró nada, prueba el de respaldo (cada 2 vueltas, para no cargar el celular)
