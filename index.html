@@ -583,9 +583,10 @@ function beep() {
   o.stop(audio.currentTime + 0.08);
 }
 
-// Lector de texto para etiquetas impresas (Brother P-touch E110), solo para el Tag. Se descarga la primera vez.
+// Lector de texto para etiquetas impresas y seriales grabados. Se descarga la primera vez.
 const TESS = 'https://fastly.jsdelivr.net/npm/tesseract.js@7/dist/tesseract.esm.min.js';
 let ocr, ocrP, ocrMode = false;
+let ocrRevision = 0; // invalida lecturas pendientes al cambiar de modo o cerrar la cámara
 function getOcr() {
   ocrP ??= (async () => {
     const w = await (await import(TESS)).default.createWorker('eng');
@@ -597,6 +598,7 @@ function getOcr() {
 }
 // Cambia entre leer códigos y leer la etiqueta impresa; se recuerda para el próximo Tag
 async function setMode(label) {
+  ocrRevision++;
   ocrMode = label;
   if (target === 'tag') store('tagMode', label ? 'label' : 'code'); // el Serial no se recuerda: abre siempre en Código
   $('#mode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.m === 'label') === label)));
@@ -620,8 +622,8 @@ function cropBand(angle) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
   const sw = b.width / k, sh = b.height / k, sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
-  // Se lleva a 120 px de alto: con letras muy grandes el lector duplica caracteres (KB0035 → KB00035)
-  const q = Math.min(1, 120 / sh), w = Math.max(1, Math.round(sw * q)), h = Math.max(1, Math.round(sh * q));
+  // Limita las etiquetas grandes; amplía hasta 3x los seriales pequeños para conservar sus trazos al reconocerlos.
+  const q = Math.min(target === 'serial' ? 3 : 1, 120 / sh), w = Math.max(1, Math.round(sw * q)), h = Math.max(1, Math.round(sh * q));
   band.width = w; band.height = h;
   const g = band.getContext('2d', { willReadFrequently: true });
   g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
@@ -678,24 +680,49 @@ const labelCode = t => {
     .filter(Boolean).join(' ');
   return code.length >= 3 && code.length <= 30 ? code : '';
 };
-// Serial leído como texto: se queda con el bloque más largo (lo que entra cortado del costado queda separado por un espacio).
-// Tiene que tener letras y números. Si parece de Apple (10, 11, 12 o 17 letras y números), O → 0 e I → 1: Apple no usa O ni I.
+// Descarta líneas regulatorias y une los fragmentos de un serial Apple separados por espacios.
+// No corrige J ni otros caracteres ambiguos: una lectura dudosa debe repetirse, no adivinarse.
+const appleSerial = w => /^([A-Z0-9]{10,12}|[A-Z0-9]{17})$/.test(w);
+const normalizeSerial = (w, apple = appleSerial(w)) => apple ? w.replace(/O/g, '0').replace(/I/g, '1') : w;
 const serialCode = t => {
-  let w = t.toUpperCase().replace(/[^A-Z0-9\s-]/g, '').split(/\s+/).map(x => x.replace(/^-+|-+$/g, ''))
-    .sort((a, b) => b.length - a.length)[0] || '';
-  if (/^([A-Z0-9]{10,12}|[A-Z0-9]{17})$/.test(w)) w = w.replace(/O/g, '0').replace(/I/g, '1');
-  return w.length >= 5 && w.length <= 30 && /[A-Z]/.test(w) && /[0-9]/.test(w) ? w : '';
+  const candidates = [];
+  for (let line of t.toUpperCase().split(/[\r\n]+/)) {
+    if (/\b(?:F?CC\s*I[D0]|IC\s*[:;]|EMC\b|MODEL(?:O)?\b|ANATEL\b|CNC\b|DESIGNED\b|ASSEMBLED\b)/.test(line)) continue;
+    line = line.replace(/^\s*(?:S\s*\/\s*N|SERIAL(?:\s+(?:NO|NUMBER))?)\b\s*[:.#-]?\s*/, '');
+    const parts = line.replace(/[^A-Z0-9\s-]/g, '').split(/\s+/).map(x => x.replace(/^-+|-+$/g, '')).filter(Boolean);
+    const joined = parts.join('');
+    const w = parts.length > 1 && appleSerial(joined) ? joined : parts.sort((a, b) => b.length - a.length)[0] || '';
+    if (w.length >= 5 && w.length <= 30 && /[A-Z]/.test(w) && /[0-9]/.test(w)) candidates.push(normalizeSerial(w));
+  }
+  return candidates.sort((a, b) => b.length - a.length)[0] || '';
 };
+// La confianza corresponde a las palabras del serial, sin penalizar puntos, sombras ni texto vecino.
+function serialReading(data) {
+  let best = { code: '', confidence: 0 };
+  for (const block of data.blocks || []) for (const paragraph of block.paragraphs || []) for (const line of paragraph.lines || []) {
+    const code = serialCode(line.text || '');
+    if (!code) continue;
+    const words = (line.words || []).map(w => ({ ...w, part: normalizeSerial(w.text.toUpperCase().replace(/[^A-Z0-9-]/g, ''), appleSerial(code)) }))
+      .filter(w => w.part && code.includes(w.part));
+    const confidence = words.length && words.map(w => w.part).join('') === code ? Math.min(...words.map(w => w.confidence)) : 0;
+    if (confidence > best.confidence) best = { code, confidence };
+  }
+  return best;
+}
 // Una lectura: primero derecho; si no sale segura, prueba la etiqueta un poco girada
 async function readLabel() {
   let got = '', conf = 0;
-  const serial = target === 'serial';
+  const serial = target === 'serial', revision = ocrRevision, s = stream;
+  const active = () => ocrMode && video && stream === s && revision === ocrRevision;
+  // El serial puede compartir el recuadro con otra línea; el Tag sigue siendo una sola línea.
+  await ocr.setParameters({ tessedit_pageseg_mode: serial ? '6' : '7' });
   for (const a of [0, -8, 8, -15, 15]) {
-    if (!ocrMode || !video) break;
-    const { data } = await ocr.recognize(cropBand(a));
-    const w = serial ? serialCode(data.text) : labelCode(data.text);
-    if (w && data.confidence > conf) { got = w; conf = data.confidence; }
-    if (w && data.confidence >= 70) break;
+    if (!active()) return '';
+    const { data } = await ocr.recognize(cropBand(a), {}, { blocks: serial });
+    if (!active()) return '';
+    const reading = serial ? serialReading(data) : { code: labelCode(data.text), confidence: data.confidence };
+    if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; }
+    if (reading.code && reading.confidence >= 70) break;
   }
   // Serial: 60 o más, porque una mala lectura (4 → B, 5 → 8) llega a 47. Además se pide la misma lectura 2 veces seguidas.
   return conf >= (serial ? 60 : 45) ? got : '';
@@ -738,12 +765,13 @@ function save(code) {
 
 // Lee sobre el cuadro completo; al leer congela la imagen y muestra el código 1,2 s antes de cerrar
 async function loop(s) {
-  let turn = 0, last = '';
+  let turn = 0, last = '', revision = ocrRevision;
   while (stream === s) {
     try {
       fit(); // por si Safari no avisa que la imagen cambió de forma
       if (video.readyState >= 2) {
         let hit;
+        if (revision !== ocrRevision) { last = ''; revision = ocrRevision; }
         if (ocrMode) {
           // Etiqueta impresa: se guarda solo si sale igual en 2 lecturas seguidas (evita guardar una mala lectura)
           const code = ocr ? await readLabel() : '';
@@ -907,6 +935,7 @@ async function setZoom(v) {
 
 function stop() {
   session++; // descarta una apertura que esté en curso
+  ocrRevision++;
   busy = false;
   if (video) { video.srcObject = null; video.remove(); video = null; }
   stream?.getTracks().forEach(t => t.stop());
