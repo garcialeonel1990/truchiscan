@@ -615,12 +615,12 @@ async function setMode(label) {
     catch (e) { if (stream && !ocrMode) setMsg('Error: ' + e.message); }
   }
 }
-// Toma solo el recuadro amarillo del video y lo endereza; puede conservar los grises del serial.
+// Toma solo el recuadro amarillo del video, lo endereza (ángulo) y lo pasa a blanco y negro.
 // El gris mezcla el canal más alto con la luminancia: así la cinta amarilla queda clara igual que la blanca.
 const band = document.createElement('canvas');
 const serialAngles = [-8, 8, -15, 15];
 let serialAngle = 0;
-function cropBand(angle, gray = false) {
+function cropBand(angle) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
   const sw = b.width / k, sh = b.height / k, sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
@@ -636,12 +636,6 @@ function cropBand(angle, gray = false) {
   for (let i = 0, j = 0; i < p.length; i += 4, j++) {
     const v = Math.round(0.5 * Math.max(p[i], p[i + 1], p[i + 2]) + 0.5 * (0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]));
     lum[j] = v; hist[v]++;
-  }
-  // Si el filtro borra trazos finos o realza el grano del metal, prueba el serial con sus tonos originales.
-  if (target === 'serial' && gray) {
-    for (let i = 0, j = 0; i < p.length; i += 4, j++) p[i] = p[i + 1] = p[i + 2] = lum[j];
-    g.putImageData(d, 0, 0);
-    return band;
   }
   // Solo en el Serial: quita la luz de fondo comparando cada punto con el gris promedio de su zona. Así el texto grabado
   // (gris sobre gris, como el serial de los teclados Apple) queda oscuro sobre claro. En el Tag no se usa: borra parte de las letras grandes de la P-touch.
@@ -717,7 +711,7 @@ function serialReading(data) {
   }
   return best;
 }
-// Serial: primero filtrado, luego en grises y un ángulo alternativo si todavía no hay una lectura segura.
+// Serial: primero derecho y un ángulo alternativo por vuelta, para volver pronto a una imagen nueva.
 // Tag: conserva los cinco intentos por lectura.
 async function readLabel() {
   let got = '', conf = 0;
@@ -725,11 +719,10 @@ async function readLabel() {
   const active = () => ocrMode && video && stream === s && revision === ocrRevision;
   // El serial puede compartir el recuadro con otra línea; el Tag sigue siendo una sola línea.
   await ocr.setParameters({ tessedit_pageseg_mode: serial ? '6' : '7' });
-  const attempts = serial ? [[0, false], [0, true], [serialAngles[serialAngle++ % serialAngles.length], false]]
-    : [0, -8, 8, -15, 15].map(a => [a, false]);
-  for (const [a, gray] of attempts) {
+  const angles = serial ? [0, serialAngles[serialAngle++ % serialAngles.length]] : [0, -8, 8, -15, 15];
+  for (const a of angles) {
     if (!active()) return '';
-    const { data } = await ocr.recognize(cropBand(a, gray), {}, { blocks: serial });
+    const { data } = await ocr.recognize(cropBand(a), {}, { blocks: serial });
     if (!active()) return '';
     const reading = serial ? serialReading(data) : { code: labelCode(data.text), confidence: data.confidence };
     if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; }
