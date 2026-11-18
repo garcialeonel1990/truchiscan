@@ -52,16 +52,19 @@
     border-radius: 999px; background: #000000B3; }
   #mode button { min-height: var(--tap); padding: 0 var(--s4); border-radius: 999px; color: #FFF; font: 600 16px system-ui; white-space: nowrap; }
   #mode button[aria-pressed="true"] { background: #FFF; color: #000; }
-  #mode, #aim, #zoom { z-index: 2; }
+  #mode, #aim, #zoom, #torch { z-index: 2; }
   /* Mientras la cámara está abierta, la ficha se oculta y la cámara usa todo el lugar libre */
   #home.scanning #card { display: none; }
   #home.scanning #cam { height: calc(100svh - env(safe-area-inset-top) - var(--s5) - 60px - var(--tabs-h) - env(safe-area-inset-bottom) - 96px); min-height: 280px; margin-bottom: 0; }
   #band { position: absolute; z-index: 1; left: 5%; right: 5%; top: 50%; height: min(26%, 150px); transform: translateY(-50%);
     border: 3px solid #FFD60A; border-radius: var(--r-ctl); box-shadow: 0 0 0 100vmax #00000033; pointer-events: none; }
   #band.line { height: 40px; } /* Serial grabado: una sola línea, para que no entre el borde metálico del equipo */
-  #zoom { position: absolute; z-index: 2; right: var(--s3); bottom: var(--s3); width: var(--tap); height: var(--tap); border-radius: 50%;
-    background: #000000B3; color: #FFD60A; font: 700 16px system-ui; }
-  #zoom:active { transform: scale(.94); }
+  #zoom, #torch { position: absolute; z-index: 2; bottom: var(--s3); width: var(--tap); height: var(--tap); border-radius: 50%;
+    background: #000000B3; color: #FFD60A; }
+  #zoom { right: var(--s3); font: 700 16px system-ui; }
+  #torch { left: var(--s3); display: grid; place-items: center; }
+  #torch[aria-pressed="true"] { background: #FFD60A; color: #000; }
+  #zoom:active, #torch:active { transform: scale(.94); }
   #ok { position: absolute; z-index: 3; inset: 0; display: flex; align-items: center; justify-content: center; padding: var(--s4); background: #000000CC; color: #32D74B; font: 700 24px var(--mono); text-align: center; word-break: break-all; }
 
   /* ===== Escanear: ficha del equipo ===== */
@@ -89,6 +92,10 @@
   .code-in::placeholder { color: var(--text3); font: 400 16px system-ui; text-transform: none; }
   .code-in:focus { outline: 3px solid var(--accent-text); outline-offset: 1px; }
   .code-in.bad { border-color: var(--warn-border); }
+  .serial-row { display: grid; grid-template-columns: minmax(0, 1fr) var(--tap); column-gap: var(--s3); row-gap: var(--s1); }
+  .serial-row label { grid-column: 1 / -1; width: auto; }
+  #serial { width: 100%; min-height: var(--tap); padding: 10px var(--s3); line-height: 24px; resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; }
+  #msg-serial { margin-left: 0; }
   .cam-btn { flex: none; display: grid; place-items: center; width: var(--tap); height: var(--tap); border-radius: var(--r-ctl);
     background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent-text); }
   .cam-btn:active { transform: scale(.95); }
@@ -207,6 +214,7 @@
   <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10.5 8v8M14 8v8M17 8v8"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-cam" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></symbol>
+  <symbol id="i-torch" viewBox="0 0 24 24"><path d="M8 6h8l-2 5v9h-4v-9L8 6zM10 11h4M12 2v1M5 3l1 1M19 3l-1 1"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-reset" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-14.1 5.2M4 12a8 8 0 0 1 14.1-5.2M18.5 3v4h-4M5.5 21v-4h4"/></symbol>
@@ -226,6 +234,7 @@
     <p id="aim" class="pill"></p>
     <div id="band" hidden></div>
     <button id="zoom" hidden>1x</button>
+    <button id="torch" aria-label="Prender linterna" aria-pressed="false" hidden><svg class="ic" aria-hidden="true"><use href="#i-torch"/></svg></button>
     <div id="ok" role="status" hidden></div>
   </div>
 
@@ -243,8 +252,8 @@
       <input id="tag" class="code-in" data-code="tag" placeholder="Escribí o escaneá" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next">
       <button class="cam-btn" data-f="tag" aria-label="Escanear Tag con la cámara"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg></button></div>
     <p id="msg-tag" class="code-msg" role="alert" hidden></p>
-    <div class="code-row"><label for="serial">Serial</label>
-      <input id="serial" class="code-in" data-code="serial" placeholder="Escribí o escaneá" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done">
+    <div class="code-row serial-row"><label for="serial">Serial</label>
+      <textarea id="serial" rows="1" class="code-in" data-code="serial" placeholder="Escribí o escaneá" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done"></textarea>
       <button class="cam-btn" data-f="serial" aria-label="Escanear Serial con la cámara"><svg class="ic" aria-hidden="true"><use href="#i-cam"/></svg></button></div>
     <p id="msg-serial" class="code-msg" role="alert" hidden></p>
     <button class="row" data-pick="ubicacion"><span class="lbl">Ubicación</span><span id="v-ubicacion" class="val"></span><span id="reqU" class="req">Obligatoria</span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
@@ -498,9 +507,27 @@ function dupOf(code, f) {
 // Limpieza de Tag / Serial (escrito o escaneado): borra los caracteres de control (tab y saltos de línea cuentan como espacio),
 // quita los espacios de los extremos, junta los repetidos y pasa a mayúsculas
 const clean = s => String(s ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
+// El serial usa todo el ancho: baja hasta 16 px y, si todavía es largo, crece en alto sin ocultar caracteres.
+let serialFitKey = '';
+const serialMeasure = document.createElement('canvas').getContext('2d');
+function fitSerial() {
+  const input = $('#serial'), width = input.clientWidth;
+  if (!width) return;
+  const key = width + '\n' + input.value;
+  if (key === serialFitKey) return;
+  serialFitKey = key;
+  const style = getComputedStyle(input), available = width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 2;
+  serialMeasure.font = `${style.fontWeight} 18px ${style.fontFamily}`;
+  const measured = serialMeasure.measureText(input.value.toUpperCase()).width;
+  input.style.fontSize = Math.max(16, Math.min(18, Math.floor(18 * available / (measured || available)))) + 'px';
+  input.style.height = 'auto';
+  input.style.height = Math.max(48, input.scrollHeight + 2) + 'px';
+  input.scrollLeft = 0;
+}
 function typed(input, commit) {
   const f = input.dataset.code, r = rows[cur];
   if (!r) return;
+  if (f === 'serial') fitSerial();
   const code = clean(input.value);
   const own = f === 'tag' ? r.serial : r.tag; // no puede ser igual al otro campo del mismo equipo
   const warn = !code ? '' : dupOf(code, f) || (code === own ? `Es el mismo código que el ${f === 'tag' ? 'Serial' : 'Tag'}` : '');
@@ -546,6 +573,7 @@ function updateMain() {
   btn.classList.toggle('alt', live);
   btn.innerHTML = live ? svg('stop') + 'Cancelar' : svg('scan') + 'Nuevo equipo';
   $('#home').classList.toggle('scanning', !!stream);
+  fitSerial();
 }
 
 function setMsg(text) {
@@ -908,7 +936,7 @@ const SIZE = { width: { ideal: 1920 }, height: { ideal: 1080 } };
 const ANDROID = /Android/i.test(navigator.userAgent);
 // Cada pedido va en su propio grupo "advanced": si el celular no soporta uno (p. ej. enfoque), el zoom igual se aplica.
 // El enfoque continuo se pide solo en Android: muchos (Samsung) quedan con foco fijo si la página no lo pide.
-const want = zoom => ({ ...SIZE, advanced: [{ zoom }, ...(ANDROID ? [{ focusMode: 'continuous' }] : [])] });
+const want = (zoom, torch) => ({ ...SIZE, advanced: [{ zoom }, ...(ANDROID ? [{ focusMode: 'continuous' }] : []), ...(torch === undefined ? [] : [{ torch }])] });
 const autofocus = s => s.getVideoTracks()[0].getCapabilities?.().focusMode?.includes('continuous');
 
 async function openCam(zoom) {
@@ -978,6 +1006,7 @@ async function start(t) {
     if (my !== session) return; // se canceló mientras arrancaba el video (stop() ya cerró todo)
     fit();
     setupZoom();
+    setupTorch();
     $('#aim').textContent = `Apuntá al ${STEP[t] || 'Tag'}`;
     setMsg('');
     $('#mode [data-m=label]').textContent = t === 'serial' ? 'Texto' : 'Etiqueta';
@@ -1005,6 +1034,8 @@ function fit() {
   video.style.visibility = 'visible';
 }
 addEventListener('resize', fit);
+addEventListener('resize', fitSerial);
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(fitSerial).observe($('#serial'));
 
 // Zoom real de la cámara (iOS 17+ / Chrome Android): amplía la imagen que se analiza.
 // Permite alejar el celular hasta donde enfoca y que el código igual se vea grande. Se recuerda el último.
@@ -1024,15 +1055,56 @@ const mark = v => {
 };
 
 async function setZoom(v) {
-  const track = stream?.getVideoTracks()[0], z = track?.getCapabilities?.().zoom;
-  if (!z) return;
-  v = Math.min(Math.max(v, z.min), z.max);
+  return adjustCamera(v);
+}
+
+let torchOn = false, torchSupported = false, cameraChanging = false;
+const TORCH_ERROR = 'No se pudo cambiar la linterna. Volvé a intentarlo.';
+function markTorch(on) {
+  torchOn = on;
+  $('#torch').setAttribute('aria-pressed', String(on));
+  $('#torch').setAttribute('aria-label', on ? 'Apagar linterna' : 'Prender linterna');
+}
+function setupTorch() {
+  torchSupported = false;
+  const track = stream?.getVideoTracks()[0];
   try {
-    // Se repite resolución (y enfoque en Android): applyConstraints reemplaza todo lo pedido antes
-    await track.applyConstraints(want(v));
-    store('zoom', v);
-    mark(v);
-  } catch {}
+    const cap = track?.getCapabilities?.().torch;
+    // Chrome informa un booleano; el estándar también permite una lista de estados soportados.
+    torchSupported = cap === true || (Array.isArray(cap) && cap.includes(true) && cap.includes(false));
+    markTorch(torchSupported && track.getSettings().torch === true);
+  } catch { torchSupported = false; markTorch(false); }
+  $('#torch').hidden = !torchSupported;
+}
+async function toggleTorch() {
+  if (torchSupported) return adjustCamera(undefined, !torchOn);
+}
+// Zoom y linterna comparten configuración: cambiar uno conserva el otro y el enfoque continuo.
+async function adjustCamera(zoom, light) {
+  const s = stream, my = session, track = s?.getVideoTracks()[0];
+  if (!track || cameraChanging) return;
+  cameraChanging = true;
+  $('#zoom').disabled = $('#torch').disabled = true;
+  try {
+    const z = track.getCapabilities?.().zoom, settings = track.getSettings();
+    if (zoom !== undefined && !z) return;
+    const nextZoom = zoom === undefined ? settings.zoom ?? 1 : Math.min(Math.max(zoom, z.min), z.max);
+    const nextLight = light ?? torchOn;
+    await track.applyConstraints(want(nextZoom, torchSupported ? nextLight : undefined));
+    if (my !== session || stream !== s) return;
+    const actual = track.getSettings();
+    if (torchSupported) markTorch(actual.torch ?? nextLight);
+    if (light !== undefined && typeof actual.torch === 'boolean' && actual.torch !== nextLight) throw new Error('torch');
+    if (zoom !== undefined) { store('zoom', actual.zoom ?? nextZoom); mark(actual.zoom ?? nextZoom); }
+    if (light !== undefined && $('#msg').textContent === TORCH_ERROR) setMsg('');
+  } catch {
+    if (my === session && stream === s && light !== undefined) setMsg(TORCH_ERROR);
+  } finally {
+    if (my === session && stream === s) {
+      cameraChanging = false;
+      $('#zoom').disabled = $('#torch').disabled = false;
+    }
+  }
 }
 
 function stop() {
@@ -1042,6 +1114,10 @@ function stop() {
   if (video) { video.srcObject = null; video.remove(); video = null; }
   stream?.getTracks().forEach(t => t.stop());
   stream = null;
+  torchSupported = cameraChanging = false;
+  markTorch(false);
+  $('#torch').hidden = true;
+  $('#zoom').disabled = $('#torch').disabled = false;
   $('#cam').hidden = true;
   $('#ok').hidden = true;
   $('#mode').hidden = $('#band').hidden = true;
@@ -1105,6 +1181,7 @@ $('#sheetClose').onclick = () => $('#sheet').close();
 $('#sheet').onclick = e => { if (e.target === $('#sheet')) $('#sheet').close(); }; // tocar fuera cierra
 $('#mode').onclick = e => { const m = e.target.closest('button')?.dataset.m; if (m) setMode(m === 'label'); };
 $('#zoom').onclick = () => { const i = zooms.indexOf(+$('#zoom').dataset.z); setZoom(zooms[(i + 1) % zooms.length]); };
+$('#torch').onclick = toggleTorch;
 const tab = toList => {
   $('#back').toggleAttribute('aria-current', !toList);
   $('#open').toggleAttribute('aria-current', toList);
