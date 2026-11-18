@@ -934,9 +934,10 @@ let busy = false; // evita abrir dos cámaras si se toca dos veces
 let session = 0; // cada apertura tiene su número; stop() lo cambia y la apertura en curso se descarta
 const SIZE = { width: { ideal: 1920 }, height: { ideal: 1080 } };
 const ANDROID = /Android/i.test(navigator.userAgent);
-// Cada pedido va en su propio grupo "advanced": si el celular no soporta uno (p. ej. enfoque), el zoom igual se aplica.
+// Zoom y linterna comparten grupo; el enfoque va aparte para que su falta de soporte no bloquee los otros controles.
 // El enfoque continuo se pide solo en Android: muchos (Samsung) quedan con foco fijo si la página no lo pide.
-const want = (zoom, torch) => ({ ...SIZE, advanced: [{ zoom }, ...(ANDROID ? [{ focusMode: 'continuous' }] : []), ...(torch === undefined ? [] : [{ torch }])] });
+const want = (zoom, torch) => ({ ...SIZE, ...(torch === undefined ? {} : { torch: { exact: torch } }),
+  advanced: [{ zoom, ...(torch === undefined ? {} : { torch }) }, ...(ANDROID ? [{ focusMode: 'continuous' }] : [])] });
 const autofocus = s => s.getVideoTracks()[0].getCapabilities?.().focusMode?.includes('continuous');
 
 async function openCam(zoom) {
@@ -1093,8 +1094,9 @@ async function adjustCamera(zoom, light) {
     await track.applyConstraints(want(nextZoom, torchSupported ? nextLight : undefined));
     if (my !== session || stream !== s) return;
     const actual = track.getSettings();
-    if (torchSupported) markTorch(actual.torch ?? nextLight);
-    if (light !== undefined && typeof actual.torch === 'boolean' && actual.torch !== nextLight) throw new Error('torch');
+    // Safari puede devolver el estado anterior en getSettings(): conserva la orden aplicada con éxito.
+    if (torchSupported) markTorch(ANDROID ? actual.torch ?? nextLight : nextLight);
+    if (ANDROID && light !== undefined && typeof actual.torch === 'boolean' && actual.torch !== nextLight) throw new Error('torch');
     if (zoom !== undefined) { store('zoom', actual.zoom ?? nextZoom); mark(actual.zoom ?? nextZoom); }
     if (light !== undefined && $('#msg').textContent === TORCH_ERROR) setMsg('');
   } catch {
