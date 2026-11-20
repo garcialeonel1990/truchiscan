@@ -144,6 +144,15 @@
   .opt[aria-pressed="true"] .ic { visibility: visible; }
   .sheet-acts { flex: none; display: grid; gap: var(--s2); margin-top: var(--s3); }
   .btn-text.danger { color: var(--danger-text); }
+  /* Modelo: buscador arriba de la lista; "Usar …" guarda un modelo que no está en la lista */
+  .search { flex: none; display: flex; align-items: center; gap: var(--s2); min-height: var(--tap); padding: 0 var(--s3); border: 1px solid var(--sep); border-radius: var(--r-ctl); background: var(--bg); }
+  .search .ic { width: 20px; height: 20px; color: var(--text3); }
+  .search input { flex: 1; min-width: 0; height: var(--tap); border: 0; background: none; color: var(--text); font: 17px system-ui; outline: none; }
+  .search:focus-within { outline: 3px solid var(--accent-text); outline-offset: 1px; }
+  .count { flex: none; margin: var(--s1) 0; color: var(--text3); font-size: 16px; }
+  .opt mark { background: none; color: var(--accent-text); font-weight: 700; }
+  .opt.use { color: var(--accent-text); font-weight: 600; }
+  .opt.use .ic { visibility: visible; }
 
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
@@ -221,6 +230,7 @@
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
   <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
 </svg>
 
@@ -259,6 +269,7 @@
     <button class="row" data-pick="ubicacion"><span class="lbl">Ubicación</span><span id="v-ubicacion" class="val"></span><span id="reqU" class="req">Obligatoria</span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
     <button class="row" data-pick="estado"><span class="lbl">Estado</span><span id="v-estado" class="val"></span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
     <button class="row" data-pick="tipo"><span class="lbl">Tipo</span><span id="v-tipo" class="val"></span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
+    <button class="row" data-pick="modelo"><span class="lbl">Modelo</span><span id="v-modelo" class="val"></span><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>
   </section>
 
   <div class="dock">
@@ -320,6 +331,9 @@
   <div class="sheet-in">
     <div class="grab" aria-hidden="true"></div>
     <h2 id="sheetTitle"></h2>
+    <label id="sheetSearch" class="search" hidden><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="sheetQ" type="search" placeholder="Buscá o escribí el modelo" aria-label="Buscá o escribí el modelo" autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="done"></label>
+    <p id="sheetCount" class="count" aria-live="polite" hidden></p>
     <div id="sheetOpts"></div>
     <div class="sheet-acts">
       <button id="sheetClear" class="btn-text danger">Quitar selección</button>
@@ -364,6 +378,9 @@ const FIELDS = {
   estado: { label: 'estado', opts: ['Rotos', 'En reparación', 'Libres', 'Asignados'] },
   tipo: { label: 'tipo', opts: ['Otro', 'Equipo de red', 'Impresora', 'Dock / Adaptador', 'Cargador', 'Auriculares', 'Mouse', 'Teclado', 'Tablet', 'iPad', 'Celular Android', 'iPhone', 'Monitor', 'PC de escritorio', 'Notebook'] },
 };
+// Modelos para elegir en la ficha y en la Lista. También aparecen los que ya se escribieron a mano.
+const MODELOS = ['ThinkPad L14', 'ThinkPad T14', 'ThinkPad T14 Gen 3', 'ThinkPad T14 Gen 4', 'ThinkPad T480', 'ThinkPad T490', 'ThinkPad T495', 'ThinkPad X1 Carbon'];
+const modelList = () => [...new Set([...MODELOS, ...rows.map(x => x.modelo).filter(Boolean)])];
 // Ubicaciones de la versión anterior: los depósitos pasan a la ubicación nueva; Reparar y Asignada pasan a Estado
 const OLD = { 'Depósito 1ro': ['ubicacion', 'Piso 1 Depósito'], 'Depósito 5to': ['ubicacion', 'Piso 5 Depósito'],
   'Reparar': ['estado', 'En reparación'], 'Asignada': ['estado', 'Asignados'] };
@@ -407,7 +424,7 @@ function openEdit(idx) {
     `<span class="lab" style="font-weight:400;color:var(--text3)">${one ? '' : 'No cambiar'}</span></div>` +
     `<div class="chips" role="group" aria-labelledby="lab-${f}">` +
     FIELDS[f].opts.map(o => `<button data-v="${esc(o)}" aria-pressed="${r[f] === o}">${esc(o)}</button>`).join('') + '</div></div>';
-  const modelos = [...new Set(rows.map(x => x.modelo).filter(Boolean))];
+  const modelos = modelList();
   const codeField = (f, label) => `<div class="field"><div class="field-h"><label for="e-${f}">${label}</label></div>` +
     `<input id="e-${f}" class="code-in" data-ecode="${f}" value="${esc(r[f] || '')}" placeholder="Escribí el ${label}" autocomplete="off" autocapitalize="characters" spellcheck="false">` +
     `<p id="em-${f}" class="code-msg" style="margin:var(--s1) 0 0" role="alert" hidden></p></div>`;
@@ -563,6 +580,8 @@ function renderCard() {
       $('#v-' + f).textContent = r[f] || `Elegí ${FIELDS[f].label}`;
       $('#v-' + f).classList.toggle('empty', !r[f]);
     }
+    $('#v-modelo').textContent = r.modelo || 'Elegí o escribí el modelo'; // opcional: no suma al avance
+    $('#v-modelo').classList.toggle('empty', !r.modelo);
     $('#reqU').hidden = !!r.ubicacion;
   }
   updateMain();
@@ -589,12 +608,36 @@ function openSheet(f) {
   const r = rows[cur];
   if (!r) return;
   sheetField = f;
-  $('#sheetTitle').textContent = { ubicacion: 'Ubicación', estado: 'Estado', tipo: 'Tipo' }[f];
-  $('#sheetOpts').innerHTML = FIELDS[f].opts.map(o =>
-    `<button class="opt" data-v="${esc(o)}" aria-pressed="${r[f] === o}"><span>${esc(o)}</span>${svg('check')}</button>`).join('');
+  $('#sheetTitle').textContent = { ubicacion: 'Ubicación', estado: 'Estado', tipo: 'Tipo', modelo: 'Modelo' }[f];
+  $('#sheetSearch').hidden = f !== 'modelo';
+  $('#sheetQ').value = '';
+  if (f === 'modelo') modelOpts();
+  else {
+    $('#sheetCount').hidden = true;
+    $('#sheetOpts').innerHTML = FIELDS[f].opts.map(o =>
+      `<button class="opt" data-v="${esc(o)}" aria-pressed="${r[f] === o}"><span>${esc(o)}</span>${svg('check')}</button>`).join('');
+  }
   $('#sheetClear').hidden = !r[f];
   $('#sheet').showModal();
   ($('#sheetOpts [aria-pressed="true"]') || $('#sheetOpts .opt'))?.focus();
+}
+// Modelo: filtra mientras se escribe (todas las palabras, sin importar mayúsculas) y resalta lo que coincide.
+// Si lo escrito no está en la lista, ofrece "Usar …" para guardarlo igual.
+function modelOpts() {
+  const r = rows[cur], q = $('#sheetQ').value.trim().replace(/\s+/g, ' '), terms = q.toLowerCase().split(' ').filter(Boolean);
+  const list = modelList().filter(m => terms.every(t => m.toLowerCase().includes(t)));
+  const mark = m => {
+    const on = new Array(m.length).fill(false), low = m.toLowerCase();
+    for (const t of terms) for (let i = low.indexOf(t); i >= 0; i = low.indexOf(t, i + 1)) on.fill(true, i, i + t.length);
+    let out = '';
+    for (let i = 0; i < m.length;) { let j = i; while (j < m.length && on[j] === on[i]) j++; out += on[i] ? `<mark>${esc(m.slice(i, j))}</mark>` : esc(m.slice(i, j)); i = j; }
+    return out;
+  };
+  const exact = list.some(m => m.toLowerCase() === q.toLowerCase());
+  $('#sheetOpts').innerHTML = (q && !exact ? `<button class="opt use" data-v="${esc(q)}"><span>Usar “${esc(q)}”</span>${svg('plus')}</button>` : '') +
+    list.map(m => `<button class="opt" data-v="${esc(m)}" aria-pressed="${r.modelo === m}"><span>${mark(m)}</span>${svg('check')}</button>`).join('');
+  $('#sheetCount').textContent = list.length ? `${list.length} modelo${list.length > 1 ? 's' : ''}` : 'Ningún modelo de la lista coincide';
+  $('#sheetCount').hidden = !q;
 }
 function setField(v) {
   rows[cur][sheetField] = v;
@@ -912,7 +955,9 @@ async function loop(s) {
           // Si el de Android no encontró nada, prueba el de respaldo (cada 2 vueltas, para no cargar el celular)
           if (!hit && backup && turn++ % 2 === 0 && stream === s) [hit] = await backup.detect(video);
         }
-        const code = hit && clean(hit.rawValue); // se guarda igual que lo escrito a mano
+        let code = hit && clean(hit.rawValue); // se guarda igual que lo escrito a mano
+        // Lenovo: el código de barras trae "1S" + tipo de máquina (10) + serial (8). Solo se guarda el serial.
+        if (code && target === 'serial' && /^1S[A-Z0-9]{18}$/.test(code)) code = code.slice(-8);
         if (code && stream === s) {
           video.pause();
           $('#band').hidden = true;
@@ -1179,6 +1224,14 @@ $('#card').addEventListener('keydown', e => {
 });
 $('#sheetOpts').onclick = e => { const o = e.target.closest('.opt'); if (o) setField(o.dataset.v); };
 $('#sheetClear').onclick = () => setField('');
+$('#sheetQ').oninput = modelOpts;
+// Enter en el buscador: si queda un solo modelo de la lista, elige ese; si no, guarda lo escrito ("Usar …")
+$('#sheetQ').onkeydown = e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const list = $('#sheetOpts').querySelectorAll('.opt:not(.use)'), o = list.length === 1 ? list[0] : $('#sheetOpts .opt');
+  if (o) setField(o.dataset.v);
+};
 $('#sheetClose').onclick = () => $('#sheet').close();
 $('#sheet').onclick = e => { if (e.target === $('#sheet')) $('#sheet').close(); }; // tocar fuera cierra
 $('#mode').onclick = e => { const m = e.target.closest('button')?.dataset.m; if (m) setMode(m === 'label'); };
