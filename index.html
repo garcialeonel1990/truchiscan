@@ -752,9 +752,12 @@ function serialBox(dark, w, h) {
 function cropBand(angle, local = true, denoise = false, invert = false) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
-  const sw = b.width / k, sh = b.height / k, sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
+  const sw = b.width / k, sh0 = b.height / k, sx = (b.left - c.left + ox) / k, sy0 = (b.top - c.top + oy) / k;
+  // Texto claro sobre fondo oscuro (hub Anker): analiza media franja más arriba y abajo. Así el serial no queda cortado por
+  // el borde si el celular está un poco inclinado o la línea no está justo en el centro. El tamaño de letra no cambia.
+  const ext = target === 'serial' && invert ? .5 : 0, sh = sh0 * (1 + 2 * ext), sy = sy0 - sh0 * ext;
   // Limita las etiquetas grandes; amplía hasta 3x los seriales pequeños para conservar sus trazos al reconocerlos.
-  const q = Math.min(target === 'serial' ? 3 : 1, 120 / sh), w = Math.max(1, Math.round(sw * q)), h = Math.max(1, Math.round(sh * q));
+  const q = Math.min(target === 'serial' ? 3 : 1, 120 / sh0), w = Math.max(1, Math.round(sw * q)), h = Math.max(1, Math.round(sh * q));
   band.width = w; band.height = h;
   const g = band.getContext('2d', { willReadFrequently: true });
   g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
@@ -775,7 +778,7 @@ function cropBand(angle, local = true, denoise = false, invert = false) {
   // Solo en el Serial: quita la luz de fondo comparando cada punto con el gris promedio de su zona. Así el texto grabado
   // (gris sobre gris, como el serial de los teclados Apple) queda oscuro sobre claro. En el Tag no se usa: borra parte de las letras grandes de la P-touch.
   if (target === 'serial' && local) {
-    const r = Math.max(4, h >> 2), W1 = w + 1, ii = new Float64Array(W1 * (h + 1));
+    const r = Math.max(4, Math.round(sh0 * q) >> 2), W1 = w + 1, ii = new Float64Array(W1 * (h + 1));
     for (let y = 0; y < h; y++) for (let x = 0, s = 0; x < w; x++) { s += lum[y * w + x]; ii[(y + 1) * W1 + x + 1] = ii[y * W1 + x + 1] + s; }
     hist.fill(0);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
