@@ -379,7 +379,7 @@ const FIELDS = {
   tipo: { label: 'tipo', opts: ['Otro', 'Equipo de red', 'Impresora', 'Dock / Adaptador', 'Cargador', 'Auriculares', 'Mouse', 'Teclado', 'Tablet', 'iPad', 'Celular Android', 'iPhone', 'Monitor', 'PC de escritorio', 'Notebook'] },
 };
 // Modelos para elegir en la ficha y en la Lista. También aparecen los que ya se escribieron a mano.
-const MODELOS = ['ThinkPad L14', 'ThinkPad T14', 'ThinkPad T14 Gen 3', 'ThinkPad T14 Gen 4', 'ThinkPad T480', 'ThinkPad T490', 'ThinkPad T495', 'ThinkPad X1 Carbon'];
+const MODELOS = ['ThinkPad L14', 'ThinkPad T14 Gen 1', 'ThinkPad T14 Gen 3', 'ThinkPad T14 Gen 4', 'ThinkPad T480', 'ThinkPad T490', 'ThinkPad T495', 'ThinkPad X1 Carbon'];
 const modelList = () => [...new Set([...MODELOS, ...rows.map(x => x.modelo).filter(Boolean)])];
 // Ubicaciones de la versión anterior: los depósitos pasan a la ubicación nueva; Reparar y Asignada pasan a Estado
 const OLD = { 'Depósito 1ro': ['ubicacion', 'Piso 1 Depósito'], 'Depósito 5to': ['ubicacion', 'Piso 5 Depósito'],
@@ -621,14 +621,16 @@ function openSheet(f) {
   $('#sheet').showModal();
   ($('#sheetOpts [aria-pressed="true"]') || $('#sheetOpts .opt'))?.focus();
 }
-// Modelo: filtra mientras se escribe (todas las palabras, sin importar mayúsculas) y resalta lo que coincide.
+// Modelo: filtra mientras se escribe y resalta lo que coincide. Cada palabra escrita tiene que coincidir con el comienzo
+// de una palabra del modelo, sin importar mayúsculas: "gen 1" encuentra "T14 Gen 1" pero no "T14 Gen 3".
 // Si lo escrito no está en la lista, ofrece "Usar …" para guardarlo igual.
 function modelOpts() {
   const r = rows[cur], q = $('#sheetQ').value.trim().replace(/\s+/g, ' '), terms = q.toLowerCase().split(' ').filter(Boolean);
-  const list = modelList().filter(m => terms.every(t => m.toLowerCase().includes(t)));
+  const starts = m => [...m.matchAll(/\S+/g)].map(w => w.index);
+  const list = modelList().filter(m => { const low = m.toLowerCase(); return terms.every(t => starts(low).some(i => low.startsWith(t, i))); });
   const mark = m => {
     const on = new Array(m.length).fill(false), low = m.toLowerCase();
-    for (const t of terms) for (let i = low.indexOf(t); i >= 0; i = low.indexOf(t, i + 1)) on.fill(true, i, i + t.length);
+    for (const t of terms) for (const i of starts(low)) if (low.startsWith(t, i)) on.fill(true, i, i + t.length);
     let out = '';
     for (let i = 0; i < m.length;) { let j = i; while (j < m.length && on[j] === on[i]) j++; out += on[i] ? `<mark>${esc(m.slice(i, j))}</mark>` : esc(m.slice(i, j)); i = j; }
     return out;
@@ -671,6 +673,7 @@ function getOcr() {
 async function setMode(label) {
   ocrRevision++;
   serialAngle = 0;
+  serialInvert = false;
   ocrMode = label;
   if (target === 'tag') store('tagMode', label ? 'label' : 'code'); // el Serial no se recuerda: abre siempre en Código
   $('#mode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.m === 'label') === label)));
@@ -692,7 +695,7 @@ async function setMode(label) {
 const band = document.createElement('canvas');
 const textBand = document.createElement('canvas');
 const serialAngles = [0, -8, 0, 8, 0, -15, 0, 15];
-let serialAngle = 0;
+let serialAngle = 0, serialInvert = false;
 // Actualiza el histograma al mover la ventana, sin ordenar todos los vecinos por píxel.
 function medianFilter(lum, w, h, radius = 1) {
   const out = lum.slice(), counts = new Uint8Array(256);
@@ -747,7 +750,7 @@ function serialBox(dark, w, h) {
   const distance = g => Math.abs(g.cy / g.count - h / 2);
   return groups.filter(g => g.count >= 5).sort((a, b) => distance(a) - distance(b) || b.count - a.count)[0];
 }
-function cropBand(angle, local = true, denoise = false) {
+function cropBand(angle, local = true, denoise = false, invert = false) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
   const sw = b.width / k, sh = b.height / k, sx = (b.left - c.left + ox) / k, sy = (b.top - c.top + oy) / k;
@@ -762,7 +765,7 @@ function cropBand(angle, local = true, denoise = false) {
   const d = g.getImageData(0, 0, w, h), p = d.data, lum = new Uint8Array(w * h), hist = new Array(256).fill(0);
   for (let i = 0, j = 0; i < p.length; i += 4, j++) {
     const v = Math.round(0.5 * Math.max(p[i], p[i + 1], p[i + 2]) + 0.5 * (0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]));
-    lum[j] = v; hist[v]++;
+    lum[j] = invert ? 255 - v : v; hist[lum[j]]++;
   }
   // Serial impreso: elimina el grano fino del metal antes del umbral global, sin amplificar la textura de fondo.
   if (target === 'serial' && (!local || denoise)) {
@@ -838,7 +841,8 @@ const serialCode = t => {
   const candidates = [];
   for (let line of t.toUpperCase().split(/[\r\n]+/)) {
     if (/\b(?:F?CC\s*I[D0]|IC\s*[:;]|EMC\b|MODEL(?:O)?\b|ANATEL\b|CNC\b|DESIGNED\b|ASSEMBLED\b)/.test(line)) continue;
-    line = line.replace(/^\s*(?:S\s*\/\s*N|SERIAL(?:\s+(?:NO|NUMBER))?)\b\s*[:.#-]?\s*/, '');
+    // Quita el rótulo delante del serial: "S/N", "SN:", "SN ACY…" o "SERIAL NO". Con dos puntos alcanza aunque no haya espacio ("SN:ACY…").
+    line = line.replace(/^\s*(?:S\s*\/?\s*N|SERIAL(?:\s+(?:NO|NUMBER))?)(?:\s*[:.#]\s*|\s+)/, '');
     const parts = line.replace(/[^A-Z0-9\s-]/g, '').split(/\s+/).map(x => x.replace(/^-+|-+$/g, '')).filter(Boolean);
     const joined = parts.join('');
     const w = parts.length > 1 && appleSerial(joined) ? joined : parts.sort((a, b) => b.length - a.length)[0] || '';
@@ -879,17 +883,22 @@ async function readLabel() {
   // El serial puede compartir el recuadro con otra línea; el Tag sigue siendo una sola línea.
   await ocr.setParameters({ tessedit_pageseg_mode: serial ? '6' : '7' });
   const angle = serialAngles[serialAngle];
-  const attempts = serial ? [[angle, false], [angle, true]] : [0, -8, 8, -15, 15].map(a => [a, true]);
-  for (const [a, local] of attempts) {
+  // Serial: si las dos preparaciones no leen nada, prueba invertida (texto claro sobre fondo oscuro, como el hub Anker).
+  // Si la invertida funcionó, la confirmación empieza por ahí para no demorar la segunda lectura.
+  const normal = [[angle, false, false], [angle, true, false]], inverted = [[angle, false, true]];
+  const attempts = serial ? (serialInvert ? [...inverted, ...normal] : [...normal, ...inverted]) : [0, -8, 8, -15, 15].map(a => [a, true, false]);
+  let usedInvert = false;
+  for (const [a, local, inv] of attempts) {
     if (!active()) return '';
-    const input = cropBand(a, local, noisy);
+    const input = cropBand(a, local, inv ? false : noisy, inv); // el filtro de textura es para fondo claro, no para el invertido
     if (serial && input.ocrSkip) { noisy = true; continue; }
     const { data } = await ocr.recognize(input, {}, { blocks: serial });
     if (!active()) return '';
     const reading = serial ? serialReading(data) : { code: labelCode(data.text), confidence: data.confidence };
-    if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; }
+    if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; usedInvert = inv; }
     if (reading.code && reading.confidence >= (serial ? 60 : 70)) break;
   }
+  if (serial) serialInvert = conf >= 60 && usedInvert;
   // Conserva el ángulo que funcionó para confirmar la segunda lectura; los fallos vuelven seguido a 0°.
   if (serial && conf < 60) serialAngle = (serialAngle + 1) % serialAngles.length;
   // Serial: confianza mínima 60 y dos lecturas iguales dentro de una ventana breve (ver loop).
@@ -1106,6 +1115,7 @@ async function setZoom(v) {
 
 let torchOn = false, torchSupported = false, cameraChanging = false;
 const TORCH_ERROR = 'No se pudo cambiar la linterna. Volvé a intentarlo.';
+const ZOOM_ERROR = 'La cámara no aceptó ese zoom. Probá con otro.';
 function markTorch(on) {
   torchOn = on;
   $('#torch').setAttribute('aria-pressed', String(on));
@@ -1131,21 +1141,34 @@ async function adjustCamera(zoom, light) {
   if (!track || cameraChanging) return;
   cameraChanging = true;
   $('#zoom').disabled = $('#torch').disabled = true;
+  let nextZoom;
   try {
     const z = track.getCapabilities?.().zoom, settings = track.getSettings();
     if (zoom !== undefined && !z) return;
-    const nextZoom = zoom === undefined ? settings.zoom ?? 1 : Math.min(Math.max(zoom, z.min), z.max);
+    nextZoom = zoom === undefined ? settings.zoom ?? 1 : Math.min(Math.max(zoom, z.min), z.max);
     const nextLight = light ?? torchOn;
-    await track.applyConstraints(want(nextZoom, torchSupported ? nextLight : undefined));
+    // Si la cámara no responde en 3 s, se libera el botón para poder volver a intentar
+    await Promise.race([track.applyConstraints(want(nextZoom, torchSupported ? nextLight : undefined)),
+      new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 3000))]);
     if (my !== session || stream !== s) return;
     const actual = track.getSettings();
     // Safari puede devolver el estado anterior en getSettings(): conserva la orden aplicada con éxito.
     if (torchSupported) markTorch(ANDROID ? actual.torch ?? nextLight : nextLight);
     if (ANDROID && light !== undefined && typeof actual.torch === 'boolean' && actual.torch !== nextLight) throw new Error('torch');
-    if (zoom !== undefined) { store('zoom', actual.zoom ?? nextZoom); mark(actual.zoom ?? nextZoom); }
+    if (zoom !== undefined) {
+      // Android puede aceptar el pedido sin cambiar el zoom: se muestra el que la cámara informa, no el pedido
+      const got = actual.zoom ?? nextZoom;
+      store('zoom', got); mark(got);
+      if (Math.abs(got - nextZoom) > 0.1) throw new Error('zoom');
+      if ($('#msg').textContent === ZOOM_ERROR) setMsg('');
+    }
     if (light !== undefined && $('#msg').textContent === TORCH_ERROR) setMsg('');
   } catch {
-    if (my === session && stream === s && light !== undefined) setMsg(TORCH_ERROR);
+    if (my === session && stream === s) {
+      // Zoom que la cámara no aplicó o no respondió: se saca del ciclo hasta cerrar la cámara, para que el botón siga a los otros
+      if (zoom !== undefined && nextZoom !== undefined) { zooms = zooms.filter(v => Math.abs(v - nextZoom) > 0.1); $('#zoom').hidden = zooms.length < 2; }
+      setMsg(light !== undefined ? TORCH_ERROR : ZOOM_ERROR);
+    }
   } finally {
     if (my === session && stream === s) {
       cameraChanging = false;
