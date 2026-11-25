@@ -749,7 +749,7 @@ function serialBox(dark, w, h) {
   const distance = g => Math.abs(g.cy / g.count - h / 2);
   return groups.filter(g => g.count >= 5).sort((a, b) => distance(a) - distance(b) || b.count - a.count)[0];
 }
-function cropBand(angle, local = true, denoise = false, invert = false) {
+function cropBand(angle, local = true, denoise = false, invert = false, stretch = false) {
   const vw = video.videoWidth, vh = video.videoHeight, c = $('#cam').getBoundingClientRect(), b = $('#band').getBoundingClientRect();
   const k = Math.max(c.width / vw, c.height / vh), ox = (vw * k - c.width) / 2, oy = (vh * k - c.height) / 2;
   const sw = b.width / k, sh0 = b.height / k, sx = (b.left - c.left + ox) / k, sy0 = (b.top - c.top + oy) / k;
@@ -786,6 +786,19 @@ function cropBand(angle, local = true, denoise = false, invert = false) {
       const m = (ii[y1 * W1 + x1] - ii[y0 * W1 + x1] - ii[y1 * W1 + x0] + ii[y0 * W1 + x0]) / ((x1 - x0) * (y1 - y0));
       const v = Math.max(0, Math.min(255, Math.round(255 - (m - lum[y * w + x]) * 6)));
       lum[y * w + x] = v; hist[v]++;
+    }
+  }
+  // Texto claro: estira el gris usando solo la franja amarilla (sin la zona extra de arriba y abajo), para que letras
+  // apenas más claras que el fondo se separen de él y el borde del equipo no fije el umbral.
+  if (ext && stretch) {
+    const y0 = Math.round(h * ext / (1 + 2 * ext)), y1 = h - y0, cut = new Array(256).fill(0);
+    for (let y = y0; y < y1; y++) for (let x = 0; x < w; x++) cut[lum[y * w + x]]++;
+    const n = (y1 - y0) * w; let lo = 0, hi = 255, a = 0;
+    while (lo < 255 && (a += cut[lo]) < n * .5) lo++;
+    a = 0; while (hi > 0 && (a += cut[hi]) < n * .01) hi--;
+    if (hi - lo >= 6) {
+      hist.fill(0);
+      for (let j = 0; j < lum.length; j++) { const v = Math.max(0, Math.min(255, Math.round((lum[j] - lo) * 255 / (hi - lo)))); lum[j] = v; hist[v]++; }
     }
   }
   let sum = 0, sumB = 0, wB = 0, best = 0, th = 128; // umbral automático (Otsu): se adapta a poca luz y reflejos
@@ -893,10 +906,11 @@ async function readLabel() {
   // Texto oscuro: las dos preparaciones de siempre y, si no alcanzan, una invertida por si el fondo engañó.
   const light = serial && cropBand(angle, false, false, false).lightText;
   const attempts = !serial ? [0, -8, 8, -15, 15].map(a => [a, true, false])
-    : light ? [[angle, false, true], [angle, true, true]] : [[angle, false, false], [angle, true, false], [angle, false, true]];
-  for (const [a, local, inv] of attempts) {
+    : light ? [[angle, false, true], [angle, true, true], [angle, false, true, true]] : [[angle, false, false], [angle, true, false], [angle, false, true]];
+  // Texto claro: el tercer intento estira el contraste, para letras grises apenas más claras que el fondo (otros hubs)
+  for (const [a, local, inv, stretch] of attempts) {
     if (!active()) return '';
-    const input = cropBand(a, local, inv ? false : noisy, inv); // el filtro de textura es para fondo claro, no para el invertido
+    const input = cropBand(a, local, inv ? false : noisy, inv, stretch); // el filtro de textura es para fondo claro, no para el invertido
     if (serial && input.ocrSkip) { noisy = true; continue; }
     const { data } = await ocr.recognize(input, {}, { blocks: serial });
     if (!active()) return '';
