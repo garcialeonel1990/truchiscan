@@ -837,12 +837,13 @@ const labelCode = t => {
 // No corrige J ni otros caracteres ambiguos: una lectura dudosa debe repetirse, no adivinarse.
 const appleSerial = w => /^([A-Z0-9]{10,12}|[A-Z0-9]{17})$/.test(w);
 const normalizeSerial = (w, apple = appleSerial(w)) => apple ? w.replace(/O/g, '0').replace(/I/g, '1') : w;
+// Rótulo delante del serial: "S/N", "SN:", "SN ACY…" o "SERIAL NO". Con dos puntos alcanza aunque no haya espacio ("SN:ACY…").
+const SERIAL_LABEL = /^\s*(?:S\s*\/?\s*N|SERIAL(?:\s+(?:NO|NUMBER))?)(?:\s*[:.#]\s*|\s+)/;
 const serialCode = t => {
   const candidates = [];
   for (let line of t.toUpperCase().split(/[\r\n]+/)) {
     if (/\b(?:F?CC\s*I[D0]|IC\s*[:;]|EMC\b|MODEL(?:O)?\b|ANATEL\b|CNC\b|DESIGNED\b|ASSEMBLED\b)/.test(line)) continue;
-    // Quita el rótulo delante del serial: "S/N", "SN:", "SN ACY…" o "SERIAL NO". Con dos puntos alcanza aunque no haya espacio ("SN:ACY…").
-    line = line.replace(/^\s*(?:S\s*\/?\s*N|SERIAL(?:\s+(?:NO|NUMBER))?)(?:\s*[:.#]\s*|\s+)/, '');
+    line = line.replace(SERIAL_LABEL, '');
     const parts = line.replace(/[^A-Z0-9\s-]/g, '').split(/\s+/).map(x => x.replace(/^-+|-+$/g, '')).filter(Boolean);
     const joined = parts.join('');
     const w = parts.length > 1 && appleSerial(joined) ? joined : parts.sort((a, b) => b.length - a.length)[0] || '';
@@ -856,7 +857,7 @@ function serialReading(data) {
   for (const block of data.blocks || []) for (const paragraph of block.paragraphs || []) for (const line of paragraph.lines || []) {
     const code = serialCode(line.text || '');
     if (!code) continue;
-    const words = (line.words || []).map(w => ({ part: normalizeSerial(w.text.toUpperCase().replace(/[^A-Z0-9-]/g, ''), appleSerial(code)), confidence: w.confidence }))
+    const words = (line.words || []).map(w => ({ part: normalizeSerial(w.text.toUpperCase().replace(SERIAL_LABEL, '').replace(/[^A-Z0-9-]/g, ''), appleSerial(code)), confidence: w.confidence }))
       .filter(w => w.part);
     // Busca las palabras que forman el serial. Un "3" o una "I" sueltos al costado no forman parte de su confianza.
     for (let start = 0; start < words.length; start++) {
@@ -1115,7 +1116,8 @@ async function setZoom(v) {
 
 let torchOn = false, torchSupported = false, cameraChanging = false;
 const TORCH_ERROR = 'No se pudo cambiar la linterna. Volvé a intentarlo.';
-const ZOOM_ERROR = 'La cámara no aceptó ese zoom. Probá con otro.';
+// Incluye el zoom que informó la cámara, para saber si quedó en otro valor o no respondió
+const zoomError = (want, got) => `La cámara no aceptó ${want}x${got == null ? '' : ` (quedó en ${+got.toFixed(1)}x)`}. Probá con otro.`;
 function markTorch(on) {
   torchOn = on;
   $('#torch').setAttribute('aria-pressed', String(on));
@@ -1141,7 +1143,7 @@ async function adjustCamera(zoom, light) {
   if (!track || cameraChanging) return;
   cameraChanging = true;
   $('#zoom').disabled = $('#torch').disabled = true;
-  let nextZoom;
+  let nextZoom, got;
   try {
     const z = track.getCapabilities?.().zoom, settings = track.getSettings();
     if (zoom !== undefined && !z) return;
@@ -1156,18 +1158,25 @@ async function adjustCamera(zoom, light) {
     if (torchSupported) markTorch(ANDROID ? actual.torch ?? nextLight : nextLight);
     if (ANDROID && light !== undefined && typeof actual.torch === 'boolean' && actual.torch !== nextLight) throw new Error('torch');
     if (zoom !== undefined) {
-      // Android puede aceptar el pedido sin cambiar el zoom: se muestra el que la cámara informa, no el pedido
-      const got = actual.zoom ?? nextZoom;
+      // Android puede aceptar el pedido sin cambiar el zoom: se muestra el que la cámara informa, no el pedido.
+      // iPhone: Safari informa el zoom con atraso, así que se usa la orden aplicada (igual que con la linterna).
+      got = ANDROID ? actual.zoom ?? nextZoom : nextZoom;
+      // Chrome puede tardar en informar el zoom nuevo: espera hasta 1 s antes de decidir que no se aplicó
+      for (let i = 0; Math.abs(got - nextZoom) > 0.1 && i < 10; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        if (my !== session || stream !== s) return;
+        got = track.getSettings().zoom ?? nextZoom;
+      }
       store('zoom', got); mark(got);
       if (Math.abs(got - nextZoom) > 0.1) throw new Error('zoom');
-      if ($('#msg').textContent === ZOOM_ERROR) setMsg('');
+      if ($('#msg').textContent.startsWith('La cámara no aceptó')) setMsg('');
     }
     if (light !== undefined && $('#msg').textContent === TORCH_ERROR) setMsg('');
   } catch {
     if (my === session && stream === s) {
       // Zoom que la cámara no aplicó o no respondió: se saca del ciclo hasta cerrar la cámara, para que el botón siga a los otros
       if (zoom !== undefined && nextZoom !== undefined) { zooms = zooms.filter(v => Math.abs(v - nextZoom) > 0.1); $('#zoom').hidden = zooms.length < 2; }
-      setMsg(light !== undefined ? TORCH_ERROR : ZOOM_ERROR);
+      setMsg(light !== undefined ? TORCH_ERROR : zoomError(nextZoom ?? zoom, got));
     }
   } finally {
     if (my === session && stream === s) {
