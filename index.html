@@ -673,7 +673,6 @@ function getOcr() {
 async function setMode(label) {
   ocrRevision++;
   serialAngle = 0;
-  serialInvert = false;
   ocrMode = label;
   if (target === 'tag') store('tagMode', label ? 'label' : 'code'); // el Serial no se recuerda: abre siempre en Código
   $('#mode').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.m === 'label') === label)));
@@ -695,7 +694,7 @@ async function setMode(label) {
 const band = document.createElement('canvas');
 const textBand = document.createElement('canvas');
 const serialAngles = [0, -8, 0, 8, 0, -15, 0, 15];
-let serialAngle = 0, serialInvert = false;
+let serialAngle = 0;
 // Actualiza el histograma al mover la ventana, sin ordenar todos los vecinos por píxel.
 function medianFilter(lum, w, h, radius = 1) {
   const out = lum.slice(), counts = new Uint8Array(256);
@@ -796,6 +795,9 @@ function cropBand(angle, local = true, denoise = false, invert = false) {
   if (target === 'serial' && denoise) th = Math.min(th, 100);
   const dark = new Uint8Array(w * h);
   for (let j = 0; j < dark.length; j++) dark[j] = lum[j] <= th ? 1 : 0;
+  // Más de la mitad oscura antes de limpiar bordes: el fondo es oscuro y el texto claro (hub Anker, plástico negro)
+  const lightText = dark.reduce((sum, v) => sum + v, 0) > dark.length * .6;
+  band.lightText = textBand.lightText = lightText;
   // Lo oscuro que toca el borde del recuadro es el equipo o la sombra de la cinta, no texto: se pinta de blanco
   const st = [];
   for (let x = 0; x < w; x++) st.push(x, (h - 1) * w + x);
@@ -884,11 +886,11 @@ async function readLabel() {
   // El serial puede compartir el recuadro con otra línea; el Tag sigue siendo una sola línea.
   await ocr.setParameters({ tessedit_pageseg_mode: serial ? '6' : '7' });
   const angle = serialAngles[serialAngle];
-  // Serial: si las dos preparaciones no leen nada, prueba invertida (texto claro sobre fondo oscuro, como el hub Anker).
-  // Si la invertida funcionó, la confirmación empieza por ahí para no demorar la segunda lectura.
-  const normal = [[angle, false, false], [angle, true, false]], inverted = [[angle, false, true]];
-  const attempts = serial ? (serialInvert ? [...inverted, ...normal] : [...normal, ...inverted]) : [0, -8, 8, -15, 15].map(a => [a, true, false]);
-  let usedInvert = false;
+  // Serial: primero mira el recuadro sin leerlo. Texto claro sobre fondo oscuro (hub Anker): solo versiones invertidas.
+  // Texto oscuro: las dos preparaciones de siempre y, si no alcanzan, una invertida por si el fondo engañó.
+  const light = serial && cropBand(angle, false, false, false).lightText;
+  const attempts = !serial ? [0, -8, 8, -15, 15].map(a => [a, true, false])
+    : light ? [[angle, false, true], [angle, true, true]] : [[angle, false, false], [angle, true, false], [angle, false, true]];
   for (const [a, local, inv] of attempts) {
     if (!active()) return '';
     const input = cropBand(a, local, inv ? false : noisy, inv); // el filtro de textura es para fondo claro, no para el invertido
@@ -896,10 +898,9 @@ async function readLabel() {
     const { data } = await ocr.recognize(input, {}, { blocks: serial });
     if (!active()) return '';
     const reading = serial ? serialReading(data) : { code: labelCode(data.text), confidence: data.confidence };
-    if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; usedInvert = inv; }
+    if (reading.code && reading.confidence > conf) { got = reading.code; conf = reading.confidence; }
     if (reading.code && reading.confidence >= (serial ? 60 : 70)) break;
   }
-  if (serial) serialInvert = conf >= 60 && usedInvert;
   // Conserva el ángulo que funcionó para confirmar la segunda lectura; los fallos vuelven seguido a 0°.
   if (serial && conf < 60) serialAngle = (serialAngle + 1) % serialAngles.length;
   // Serial: confianza mínima 60 y dos lecturas iguales dentro de una ventana breve (ver loop).
@@ -991,8 +992,12 @@ const SIZE = { width: { ideal: 1920 }, height: { ideal: 1080 } };
 const ANDROID = /Android/i.test(navigator.userAgent);
 // Zoom y linterna comparten grupo; el enfoque va aparte para que su falta de soporte no bloquee los otros controles.
 // El enfoque continuo se pide solo en Android: muchos (Samsung) quedan con foco fijo si la página no lo pide.
-const want = (zoom, torch) => ({ ...SIZE, ...(torch === undefined ? {} : { torch: { exact: torch } }),
-  advanced: [{ zoom, ...(torch === undefined ? {} : { torch }) }, ...(ANDROID ? [{ focusMode: 'continuous' }] : [])] });
+// Android (Chrome): cada pedido va en su propio grupo "advanced" y ninguno es obligatorio. Si un grupo no se puede
+// aplicar, Chrome lo salta y aplica los demás; un pedido obligatorio que no acepta rechazaría el zoom y la linterna juntos.
+// iPhone (Safari): la linterna va obligatoria y junto al zoom, como estaba (así funciona en Safari).
+const want = (zoom, torch) => ANDROID
+  ? { ...SIZE, advanced: [{ zoom }, { focusMode: 'continuous' }, ...(torch === undefined ? [] : [{ torch }])] }
+  : { ...SIZE, ...(torch === undefined ? {} : { torch: { exact: torch } }), advanced: [{ zoom, ...(torch === undefined ? {} : { torch }) }] };
 const autofocus = s => s.getVideoTracks()[0].getCapabilities?.().focusMode?.includes('continuous');
 
 async function openCam(zoom) {
